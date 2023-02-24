@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/"}
-safer-ffi = "0.0.10"
+safer-ffi = { version = "0.0.10", features = ["proc_macros"] }
 
 [dev-dependencies]
 trybuild = "1"

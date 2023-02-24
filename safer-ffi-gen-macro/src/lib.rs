@@ -4,11 +4,11 @@ use quote::{format_ident, quote, ToTokens};
 use syn::{
     parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma,
     AngleBracketedGenericArguments, FnArg, ImplItem, ImplItemMethod, ItemImpl, Pat, PathArguments,
-    ReturnType, Type,
+    ReturnType, Type, TypePath,
 };
 
-#[derive(Debug)]
-enum FFIType {
+#[derive(Debug, Clone)]
+enum FFISafeType {
     Vec(AngleBracketedGenericArguments),
     // TODO: Slice
     String,
@@ -16,6 +16,12 @@ enum FFIType {
     Opaque(Ident),
     // TODO: &str
     // TODO: Anything that isn't listed should be repr_c::Box
+}
+
+#[derive(Debug, Clone)]
+struct FFIType {
+    native_type: TypePath,
+    ffi_safe_type: FFISafeType,
 }
 
 impl FFIType {
@@ -30,33 +36,40 @@ impl FFIType {
             .last()
             .ok_or_else(|| syn::Error::new(path.span(), "unexpected empty path"))?;
 
-        match last_segment.ident.to_string().as_str() {
+        let ffi_safe_type = match last_segment.ident.to_string().as_str() {
             "Vec" => {
                 let PathArguments::AngleBracketed(ref args) = last_segment.arguments else {
                     return Err(syn::Error::new(last_segment.arguments.span(), "invalid path arguments"));
                 };
-                Ok(FFIType::Vec(args.clone()))
+
+                Ok::<_, syn::Error>(FFISafeType::Vec(args.clone()))
             }
             "Box" => {
                 let PathArguments::AngleBracketed(ref args) = last_segment.arguments else {
                     return Err(syn::Error::new(last_segment.arguments.span(), "invalid path arguments"));
                 };
-                Ok(FFIType::Box(args.clone()))
+
+                Ok(FFISafeType::Box(args.clone()))
             }
-            "String" => Ok(FFIType::String),
+            "String" => Ok(FFISafeType::String),
             // Anything that isn't listed should be repr_c::Box
-            _ => Ok(FFIType::Opaque(last_segment.ident.clone())),
-        }
+            _ => Ok(FFISafeType::Opaque(last_segment.ident.clone())),
+        }?;
+
+        Ok(FFIType {
+            native_type: path,
+            ffi_safe_type,
+        })
     }
 }
 
-impl ToTokens for FFIType {
+impl ToTokens for FFISafeType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
-            FFIType::Vec(args) => quote! { safer_ffi::prelude::repr_c::Vec #args },
-            FFIType::Box(args) => quote! { safer_ffi::prelude::repr_c::Box #args },
-            FFIType::String => quote! { safer_ffi::prelude::repr_c::String },
-            FFIType::Opaque(ident) => quote! { safer_ffi::prelude::repr_c::Box<#ident> },
+            FFISafeType::Vec(args) => quote! { safer_ffi::prelude::repr_c::Vec #args },
+            FFISafeType::Box(args) => quote! { safer_ffi::prelude::repr_c::Box #args },
+            FFISafeType::String => quote! { safer_ffi::prelude::repr_c::String },
+            FFISafeType::Opaque(ident) => quote! { #ident },
         }
         .to_tokens(tokens)
     }
@@ -67,7 +80,7 @@ struct ReturnFFIType(Option<FFIType>);
 
 impl ToTokens for ReturnFFIType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        match &self.0 {
+        match self.0.as_ref().map(|v| &v.ffi_safe_type) {
             Some(ffi_type) => quote! { -> #ffi_type },
             None => quote! {},
         }
@@ -75,7 +88,7 @@ impl ToTokens for ReturnFFIType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct FFIArgument {
     name: Box<Pat>,
     ffi_type: FFIType,
@@ -84,10 +97,34 @@ struct FFIArgument {
 impl ToTokens for FFIArgument {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let name = &self.name;
-        let ffi_type = &self.ffi_type;
+        let ffi_type = &self.ffi_type.ffi_safe_type;
 
         quote! {
            #name: #ffi_type
+        }
+        .to_tokens(tokens)
+    }
+}
+
+#[derive(Debug)]
+#[non_exhaustive]
+struct FFIArgumentConversion {
+    ffi_arg: FFIArgument,
+}
+
+impl FFIArgumentConversion {
+    fn new(ffi_arg: FFIArgument) -> FFIArgumentConversion {
+        FFIArgumentConversion { ffi_arg }
+    }
+}
+
+impl ToTokens for FFIArgumentConversion {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let name = &self.ffi_arg.name;
+        let orig = &self.ffi_arg.ffi_type.native_type;
+
+        quote! {
+            let #name: #orig = #name.into();
         }
         .to_tokens(tokens)
     }
@@ -110,13 +147,14 @@ fn arg_to_ffi(arg: FnArg) -> syn::Result<FFIArgument> {
 
 #[derive(Debug)]
 struct FFIFunction {
-    name: String,
+    module_name: TypePath,
+    function_name: Ident,
     parameters: Punctuated<FFIArgument, Comma>,
     output: ReturnFFIType,
 }
 
 impl FFIFunction {
-    fn new(module_name: &str, method: ImplItemMethod) -> syn::Result<Self> {
+    fn new(module_name: TypePath, method: ImplItemMethod) -> syn::Result<Self> {
         // TODO: Support async
         if method.sig.asyncness.is_some() {
             return Err(syn::Error::new(method.span(), "async is not supported"));
@@ -138,25 +176,51 @@ impl FFIFunction {
         };
 
         Ok(Self {
-            name: format!("{}_{}", module_name.to_case(Case::Snake), method.sig.ident),
+            module_name,
+            function_name: method.sig.ident,
             parameters: inputs,
             output,
         })
+    }
+
+    fn ffi_funcation_name(&self) -> Ident {
+        format_ident!(
+            "{}_{}",
+            self.module_name
+                .to_token_stream()
+                .to_string()
+                .to_case(Case::Snake),
+            self.function_name
+        )
     }
 }
 
 impl ToTokens for FFIFunction {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let ident = format_ident!("{}", self.name);
-        let inputs = &self.parameters;
-        let output = &self.output;
+        let ffi_function_name = self.ffi_funcation_name();
+        let ffi_function_inputs = &self.parameters;
+        let ffi_function_output = &self.output;
+        let module_name = &self.module_name;
+        let function_name = &self.function_name;
+
+        let type_conversions = self
+            .parameters
+            .iter()
+            .map(|arg| FFIArgumentConversion::new(arg.clone()))
+            .collect::<Vec<_>>();
+
+        let input_names: Punctuated<Box<Pat>, Comma> =
+            Punctuated::from_iter(self.parameters.iter().map(|arg| arg.name.clone()));
 
         // TODO: Switch to safer_ffi::export_ffi
         quote! {
             #[no_mangle]
-            pub fn #ident(#inputs) #output {
-                // TODO: Convert the inputs, call original function, convert output
-                println!("Hello world!");
+            pub fn #ffi_function_name(#ffi_function_inputs) #ffi_function_output {
+                #(#type_conversions)*
+
+                let res = #module_name::#function_name(#input_names);
+
+                res.into()
             }
         }
         .to_tokens(tokens);
@@ -174,12 +238,6 @@ impl FFIModule {
             return Err(syn::Error::new(impl_block.span(), "impl block must be for a struct"));
         };
 
-        let module_name = path
-            .path
-            .get_ident()
-            .ok_or_else(|| syn::Error::new(path.span(), "multiple path segments are not allowed"))?
-            .to_string();
-
         // Find functions
         let functions = impl_block
             .items
@@ -194,7 +252,7 @@ impl FFIModule {
                             .iter()
                             .any(|segment| segment.ident == "safer_ffi_gen_func")
                     })
-                    .then_some(FFIFunction::new(&module_name, method)),
+                    .then_some(FFIFunction::new(path.clone(), method)),
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;

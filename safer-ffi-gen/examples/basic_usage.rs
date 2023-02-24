@@ -1,5 +1,8 @@
+use safer_ffi::derive_ReprC;
 use safer_ffi_gen::{safer_ffi_gen, safer_ffi_gen_func};
 
+#[derive_ReprC]
+#[ReprC::opaque]
 pub struct TestStruct {
     private_vec: Vec<u8>,
     private_string: String,
