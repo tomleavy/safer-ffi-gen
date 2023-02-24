@@ -12,6 +12,7 @@ enum FFIType {
     Vec(AngleBracketedGenericArguments),
     // TODO: Slice
     String,
+    Box(AngleBracketedGenericArguments),
     Opaque(Ident),
     // TODO: &str
     // TODO: Anything that isn't listed should be repr_c::Box
@@ -36,6 +37,12 @@ impl FFIType {
                 };
                 Ok(FFIType::Vec(args.clone()))
             }
+            "Box" => {
+                let PathArguments::AngleBracketed(ref args) = last_segment.arguments else {
+                    return Err(syn::Error::new(last_segment.arguments.span(), "invalid path arguments"));
+                };
+                Ok(FFIType::Box(args.clone()))
+            }
             "String" => Ok(FFIType::String),
             // Anything that isn't listed should be repr_c::Box
             _ => Ok(FFIType::Opaque(last_segment.ident.clone())),
@@ -47,6 +54,7 @@ impl ToTokens for FFIType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
             FFIType::Vec(args) => quote! { safer_ffi::prelude::repr_c::Vec #args },
+            FFIType::Box(args) => quote! { safer_ffi::prelude::repr_c::Box #args },
             FFIType::String => quote! { safer_ffi::prelude::repr_c::String },
             FFIType::Opaque(ident) => quote! { safer_ffi::prelude::repr_c::Box<#ident> },
         }
