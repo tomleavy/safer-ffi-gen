@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "safer-ffi-gen-core",
+    "safer-ffi-gen"
+]
