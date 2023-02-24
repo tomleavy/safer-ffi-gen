@@ -3,18 +3,12 @@ name = "safer-ffi-gen"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-proc-macro = true
-
 [dependencies]
-safer-ffi-gen-core = { path = "../safer-ffi-gen-core/"}
-syn = { version = "1", features = ["extra-traits", "full"] }
-quote = "1"
-proc-macro2 = "1"
+safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/"}
+safer-ffi = "0.0.10"
 
 [dev-dependencies]
 trybuild = "1"
-safer-ffi = "0.0.10"
 
 [[example]]
 name = "basic_usage"
