@@ -164,7 +164,7 @@ impl ToTokens for FFIFunction {
 }
 
 #[derive(Debug)]
-pub struct FFIModule {
+struct FFIModule {
     functions: Vec<FFIFunction>,
 }
 
@@ -214,4 +214,29 @@ impl Parse for FFIModule {
         let impl_block = input.parse::<ItemImpl>()?;
         FFIModule::new(impl_block)
     }
+}
+
+#[proc_macro_attribute]
+pub fn safer_ffi_gen(
+    _attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let mut item = proc_macro2::TokenStream::from(item);
+
+    let output = syn::parse2::<FFIModule>(item.clone()).unwrap();
+
+    // Add the output to the input
+    output.to_tokens(&mut item);
+
+    proc_macro::TokenStream::from(item)
+}
+
+#[proc_macro_attribute]
+// TODO: This isn't necessary, but it is easier for now with debugging to avoid
+// having to filter out recursive safer_ffi_gen inside an impl
+pub fn safer_ffi_gen_func(
+    _attr: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    item
 }
