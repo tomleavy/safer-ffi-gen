@@ -2,9 +2,12 @@ use convert_case::{Case, Casing};
 use proc_macro2::Ident;
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma,
+    parse::Parse,
+    punctuated::Punctuated,
+    spanned::Spanned,
+    token::{And, Comma},
     AngleBracketedGenericArguments, FnArg, ImplItem, ImplItemMethod, ItemImpl, Pat, PathArguments,
-    ReturnType, Type, TypePath,
+    ReturnType, Token, Type, TypePath,
 };
 
 #[derive(Debug, Clone)]
@@ -24,12 +27,10 @@ struct FFIType {
     ffi_safe_type: FFISafeType,
 }
 
-impl FFIType {
-    fn new(ty: Box<Type>) -> Result<Self, syn::Error> {
-        let Type::Path(path) = *ty else {
-            return Err(syn::Error::new(ty.span(), "unexpected non-path value"));
-        };
+impl TryFrom<TypePath> for FFIType {
+    type Error = syn::Error;
 
+    fn try_from(path: TypePath) -> Result<Self, Self::Error> {
         let last_segment = path
             .path
             .segments
@@ -63,6 +64,18 @@ impl FFIType {
     }
 }
 
+impl TryFrom<Box<Type>> for FFIType {
+    type Error = syn::Error;
+
+    fn try_from(ty: Box<Type>) -> Result<Self, Self::Error> {
+        let Type::Path(path) = *ty else {
+            return Err(syn::Error::new(ty.span(), "unexpected non-path value"));
+        };
+
+        FFIType::try_from(path)
+    }
+}
+
 impl ToTokens for FFISafeType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
@@ -92,15 +105,20 @@ impl ToTokens for ReturnFFIType {
 struct FFIArgument {
     name: Box<Pat>,
     ffi_type: FFIType,
+    mutable: Option<Token![mut]>,
+    reference: Option<Token![&]>,
+    is_receiver: bool,
 }
 
 impl ToTokens for FFIArgument {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let name = &self.name;
         let ffi_type = &self.ffi_type.ffi_safe_type;
+        let reference = &self.reference;
+        let mutable = &self.mutable;
 
         quote! {
-           #name: #ffi_type
+           #name: #reference #mutable #ffi_type
         }
         .to_tokens(tokens)
     }
@@ -122,25 +140,44 @@ impl ToTokens for FFIArgumentConversion {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let name = &self.ffi_arg.name;
         let orig = &self.ffi_arg.ffi_type.native_type;
+        let reference = &self.ffi_arg.reference;
+        let mutable = &self.ffi_arg.mutable;
 
         quote! {
-            let #name: #orig = #name.into();
+            let #name: #reference #mutable #orig = #name.into();
         }
         .to_tokens(tokens)
     }
 }
 
-fn arg_to_ffi(arg: FnArg) -> syn::Result<FFIArgument> {
+fn arg_to_ffi(module_name: &TypePath, arg: FnArg) -> syn::Result<FFIArgument> {
     match arg {
-        // TODO: Receiver conversion, which requires knowing the type name
-        FnArg::Receiver(rec) => Err(syn::Error::new(
-            rec.span(),
-            "only non-receiver methods supported",
-        )),
+        FnArg::Receiver(rec) => {
+            if rec.lifetime().is_some() {
+                return Err(syn::Error::new(
+                    rec.lifetime().span(),
+                    "named lifetime's are not supported for receivers",
+                ));
+            }
+
+            Ok(FFIArgument {
+                name: Pat::Verbatim(quote! { this }.to_token_stream()).into(),
+                ffi_type: FFIType::try_from(module_name.clone())?,
+                reference: rec.reference.map(|_| And::default()),
+                is_receiver: true,
+                mutable: rec.mutability,
+            })
+        }
 
         FnArg::Typed(pat_type) => Ok(FFIArgument {
             name: pat_type.pat,
-            ffi_type: FFIType::new(pat_type.ty)?,
+            ffi_type: FFIType::try_from(pat_type.ty.clone())?,
+            reference: matches!(*pat_type.ty.clone(), Type::Reference(_)).then_some(And::default()),
+            is_receiver: false,
+            mutable: match *pat_type.ty {
+                Type::Reference(reference) => reference.mutability,
+                _ => None,
+            },
         }),
     }
 }
@@ -160,25 +197,25 @@ impl FFIFunction {
             return Err(syn::Error::new(method.span(), "async is not supported"));
         }
 
-        let inputs =
+        let parameters =
             method
                 .sig
                 .inputs
                 .into_iter()
                 .try_fold(Punctuated::new(), |mut inputs, arg| {
-                    inputs.push(arg_to_ffi(arg)?);
+                    inputs.push(arg_to_ffi(&module_name, arg)?);
                     Ok::<_, syn::Error>(inputs)
                 })?;
 
         let output = match method.sig.output {
             ReturnType::Default => ReturnFFIType(None),
-            ReturnType::Type(_, otype) => ReturnFFIType(Some(FFIType::new(otype)?)),
+            ReturnType::Type(_, otype) => ReturnFFIType(Some(FFIType::try_from(otype)?)),
         };
 
         Ok(Self {
             module_name,
             function_name: method.sig.ident,
-            parameters: inputs,
+            parameters,
             output,
         })
     }
@@ -206,6 +243,7 @@ impl ToTokens for FFIFunction {
         let type_conversions = self
             .parameters
             .iter()
+            .filter(|a| !a.is_receiver)
             .map(|arg| FFIArgumentConversion::new(arg.clone()))
             .collect::<Vec<_>>();
 

@@ -18,8 +18,14 @@ impl TestStruct {
         }
     }
 
-    pub fn do_something(&self, input: &str) -> String {
-        input.to_string()
+    #[safer_ffi_gen_func]
+    pub fn do_something_with_string(&self, input: String) -> String {
+        format!("{} was the input", input)
+    }
+
+    #[safer_ffi_gen_func]
+    pub fn do_something_mut_with_string(&mut self, input: String) -> String {
+        format!("{} was the input", input)
     }
 
     pub fn do_something_else(&self, input: &[u8]) -> Vec<u8> {
