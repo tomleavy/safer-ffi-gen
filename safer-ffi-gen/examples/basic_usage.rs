@@ -9,14 +9,14 @@ pub struct TestStruct {
 }
 
 impl safer_ffi_gen::FfiType for TestStruct {
-    type Foreign = TestStruct;
+    type Safe = safer_ffi::boxed::Box<TestStruct>;
 
-    fn from_foreign(x: Self::Foreign) -> Self {
-        x
+    fn from_safe(x: Self::Safe) -> Self {
+        *x.into()
     }
 
-    fn to_foreign(self) -> Self::Foreign {
-        self
+    fn into_safe(self) -> Self::Safe {
+        safer_ffi::boxed::Box::new(self)
     }
 }
 
