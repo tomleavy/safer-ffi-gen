@@ -23,7 +23,7 @@ struct ReturnFFIType(Option<FFIType>);
 impl ToTokens for ReturnFFIType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self.0.as_ref().map(|v| &v.native_type) {
-            Some(ty) => quote! { -> <#ty as ::safer_ffi_gen::FfiType>::Foreign },
+            Some(ty) => quote! { -> <#ty as ::safer_ffi_gen::FfiType>::Safe },
             None => quote! {},
         }
         .to_tokens(tokens)
@@ -42,7 +42,7 @@ impl ToTokens for FFIArgument {
         let ty = &self.ffi_type.native_type;
 
         quote! {
-           #name: <#ty as ::safer_ffi_gen::FfiType>::Foreign
+           #name: <#ty as ::safer_ffi_gen::FfiType>::Safe
         }
         .to_tokens(tokens)
     }
@@ -65,7 +65,7 @@ impl ToTokens for FFIArgumentConversion {
         let name = &self.ffi_arg.name;
 
         quote! {
-            let #name = ::safer_ffi_gen::FfiType::from_foreign(#name);
+            let #name = ::safer_ffi_gen::FfiType::from_safe(#name);
         }
         .to_tokens(tokens)
     }
@@ -170,7 +170,7 @@ impl ToTokens for FFIFunction {
         let input_names: Punctuated<Ident, Comma> =
             Punctuated::from_iter(self.parameters.iter().map(|arg| arg.name.clone()));
 
-        // TODO: Switch to safer_ffi::export_ffi
+        // TODO: Switch to safer_ffi::ffi_export
         quote! {
             #[no_mangle]
             pub extern "C" fn #ffi_function_name(#ffi_function_inputs) #ffi_function_output {
@@ -178,7 +178,7 @@ impl ToTokens for FFIFunction {
 
                 let res = #module_name::#function_name(#input_names);
 
-                ::safer_ffi_gen::FfiType::to_foreign(res)
+                ::safer_ffi_gen::FfiType::into_safe(res)
             }
         }
         .to_tokens(tokens);
