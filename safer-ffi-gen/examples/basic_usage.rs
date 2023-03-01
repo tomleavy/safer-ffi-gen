@@ -8,6 +8,18 @@ pub struct TestStruct {
     private_string: String,
 }
 
+impl safer_ffi_gen::FfiType for TestStruct {
+    type Foreign = TestStruct;
+
+    fn from_foreign(x: Self::Foreign) -> Self {
+        x
+    }
+
+    fn to_foreign(self) -> Self::Foreign {
+        self
+    }
+}
+
 #[safer_ffi_gen]
 impl TestStruct {
     #[safer_ffi_gen_func]
