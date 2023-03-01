@@ -2,8 +2,9 @@ use convert_case::{Case, Casing};
 use proc_macro2::{Ident, Span};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg, ImplItem,
-    ImplItemMethod, ItemImpl, Pat, ReturnType, Type, TypePath, TypeReference,
+    parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg, GenericArgument,
+    ImplItem, ImplItemMethod, ItemImpl, Pat, PathArguments, PathSegment, ReturnType, Type,
+    TypePath, TypeReference,
 };
 
 #[derive(Debug, Clone)]
@@ -20,8 +21,54 @@ impl FFIType {
 #[derive(Debug)]
 struct ReturnFFIType(Option<FFIType>);
 
+impl ReturnFFIType {
+    fn last_path_segment(&self) -> Option<&PathSegment> {
+        self.0
+            .as_ref()
+            .and_then(|ffi_type| match ffi_type.native_type {
+                Type::Path(ref path) => path.path.segments.last(),
+                _ => None,
+            })
+            .filter(|last_path| last_path.ident.to_string().as_str() == "Result")
+    }
+
+    fn is_result(&self) -> bool {
+        self.last_path_segment().is_some()
+    }
+
+    fn out_arg(&self) -> Option<FFIArgument> {
+        self.last_path_segment().and_then(|ffi_type| {
+            let name = Ident::new("out", Span::call_site());
+
+            let PathArguments::AngleBracketed(ref args) = ffi_type.arguments else {
+                    return None;
+                };
+
+            let Some(GenericArgument::Type(out_type)) = args.args.first() else {
+                    return None;
+                };
+
+            if let Type::Tuple(tuple) = out_type {
+                if tuple.elems.is_empty() {
+                    return None;
+                }
+            }
+
+            Some(FFIArgument {
+                name,
+                ffi_type: FFIType::new(out_type.clone()),
+                is_out: true,
+            })
+        })
+    }
+}
+
 impl ToTokens for ReturnFFIType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        if self.is_result() {
+            return quote! { -> ::std::os::raw::c_int }.to_tokens(tokens);
+        }
+
         match self.0.as_ref().map(|v| &v.native_type) {
             Some(ty) => quote! { -> <#ty as ::safer_ffi_gen::FfiType>::Safe },
             None => quote! {},
@@ -34,6 +81,7 @@ impl ToTokens for ReturnFFIType {
 struct FFIArgument {
     name: Ident,
     ffi_type: FFIType,
+    is_out: bool,
 }
 
 impl ToTokens for FFIArgument {
@@ -41,8 +89,14 @@ impl ToTokens for FFIArgument {
         let name = &self.name;
         let ty = &self.ffi_type.native_type;
 
-        quote! {
-           #name: <#ty as ::safer_ffi_gen::FfiType>::Safe
+        if self.is_out {
+            quote! {
+                #name: ::safer_ffi::prelude::Out<'_, <#ty as ::safer_ffi_gen::FfiType>::Safe>
+            }
+        } else {
+            quote! {
+               #name: <#ty as ::safer_ffi_gen::FfiType>::Safe
+            }
         }
         .to_tokens(tokens)
     }
@@ -88,6 +142,7 @@ fn arg_to_ffi(module_name: &TypePath, arg: FnArg) -> syn::Result<FFIArgument> {
             Ok(FFIArgument {
                 name: Ident::new("this", Span::call_site()),
                 ffi_type: FFIType::new(ty),
+                is_out: false,
             })
         }
         FnArg::Typed(pat_type) => {
@@ -98,6 +153,7 @@ fn arg_to_ffi(module_name: &TypePath, arg: FnArg) -> syn::Result<FFIArgument> {
             Ok(FFIArgument {
                 name: ident.ident.clone(),
                 ffi_type: FFIType::new((*pat_type.ty).clone()),
+                is_out: false,
             })
         }
     }
@@ -118,17 +174,21 @@ impl FFIFunction {
             return Err(syn::Error::new(method.span(), "async is not supported"));
         }
 
-        let parameters = method
+        let mut parameters = method
             .sig
             .inputs
             .into_iter()
             .map(|arg| arg_to_ffi(&module_name, arg))
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Punctuated<FFIArgument, Comma>, _>>()?;
 
         let output = match method.sig.output {
             ReturnType::Default => ReturnFFIType(None),
             ReturnType::Type(_, otype) => ReturnFFIType(Some(FFIType::new(*otype))),
         };
+
+        if let Some(out_arg) = output.out_arg() {
+            parameters.push(out_arg);
+        }
 
         Ok(Self {
             module_name,
@@ -161,11 +221,45 @@ impl ToTokens for FFIFunction {
         let type_conversions = self
             .parameters
             .iter()
+            .filter(|arg| !arg.is_out)
             .cloned()
             .map(FFIArgumentConversion::new);
 
-        let input_names: Punctuated<Ident, Comma> =
-            Punctuated::from_iter(self.parameters.iter().map(|arg| arg.name.clone()));
+        let input_names: Punctuated<Ident, Comma> = Punctuated::from_iter(
+            self.parameters
+                .iter()
+                .filter(|arg| !arg.is_out)
+                .map(|arg| arg.name.clone()),
+        );
+
+        let result_handling = if self.output.is_result() {
+            let handle_success = if self.output.out_arg().is_some() {
+                quote! {
+                    out.write(::safer_ffi_gen::FfiType::into_safe(output));
+                    0
+                }
+            } else {
+                quote! {0}
+            };
+
+            // TODO: Set / get thread local error based on struct name
+            let handle_error = quote! { -1 };
+
+            quote! {
+                match res {
+                    Ok(output) => {
+                        #handle_success
+                    }
+                    Err(_) => {
+                        #handle_error
+                    },
+                }
+            }
+        } else {
+            quote! {
+                ::safer_ffi_gen::FfiType::into_safe(res)
+            }
+        };
 
         quote! {
             #[::safer_ffi_gen::safer_ffi::ffi_export]
@@ -174,10 +268,10 @@ impl ToTokens for FFIFunction {
 
                 let res = #module_name::#function_name(#input_names);
 
-                ::safer_ffi_gen::FfiType::into_safe(res)
+                #result_handling
             }
         }
-        .to_tokens(tokens);
+        .to_tokens(tokens)
     }
 }
 
