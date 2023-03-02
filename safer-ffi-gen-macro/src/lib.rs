@@ -242,15 +242,17 @@ impl ToTokens for FFIFunction {
                 quote! {0}
             };
 
-            // TODO: Set / get thread local error based on struct name
-            let handle_error = quote! { -1 };
+            let handle_error = quote! {
+                #module_name::set_last_error(err);
+                -1
+            };
 
             quote! {
                 match res {
                     Ok(output) => {
                         #handle_success
                     }
-                    Err(_) => {
+                    Err(err) => {
                         #handle_error
                     },
                 }
@@ -374,8 +376,14 @@ fn process_ffi_type(
     let ty_def = syn::parse2::<syn::ItemStruct>(input)?;
     let ty = &ty_def.ident;
     let ty_visibility = &ty_def.vis;
+
     let drop_ident = Ident::new(
         &format!("{}_free", ty.to_string().to_case(Case::Snake)),
+        Span::call_site(),
+    );
+
+    let last_error_ident = Ident::new(
+        &format!("{}_last_error", ty.to_string().to_case(Case::Snake)),
         Span::call_site(),
     );
 
@@ -399,6 +407,25 @@ fn process_ffi_type(
         #[::safer_ffi_gen::safer_ffi::ffi_export]
         #ty_visibility fn #drop_ident(x: <#ty as ::safer_ffi_gen::FfiType>::Safe) {
             ::core::mem::drop(x);
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #ty_visibility fn #last_error_ident() -> Option<::safer_ffi::prelude::repr_c::String> {
+            #ty::LAST_ERROR.with(|prev| {
+                (*prev.borrow())
+                .as_ref()
+                .map(|err| ::safer_ffi::prelude::repr_c::String::from(err.to_string()))
+            })
+        }
+
+        impl #ty {
+            thread_local! {
+                static LAST_ERROR: ::std::cell::RefCell<Option<Box<dyn std::error::Error>>> = ::std::cell::RefCell::new(None);
+            }
+
+            pub(crate) fn set_last_error<E: std::error::Error + 'static>(err: E) {
+                Self::LAST_ERROR.with(|prev| *prev.borrow_mut() = Some(Box::new(err)))
+            }
         }
     })
 }

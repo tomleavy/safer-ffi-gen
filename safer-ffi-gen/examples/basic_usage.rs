@@ -1,3 +1,5 @@
+use std::io::ErrorKind;
+
 use safer_ffi_gen::{ffi_type, safer_ffi_gen, safer_ffi_gen_func};
 
 #[ffi_type(opaque)]
@@ -42,6 +44,11 @@ impl TestStruct {
     }
 
     #[safer_ffi_gen_func]
+    pub fn do_something_that_fails(&self) -> Result<(), std::io::Error> {
+        Err(std::io::Error::new(ErrorKind::Other, "test failure"))
+    }
+
+    #[safer_ffi_gen_func]
     pub fn do_something_with_slice(&self, input: &[u8]) -> Vec<u8> {
         input.to_vec()
     }
@@ -58,5 +65,13 @@ impl TestStruct {
 }
 
 pub fn main() {
-    println!("This example is just to aid with development")
+    let test_struct = test_struct_new(vec![0, 1].into(), "test".to_string().into());
+
+    assert_eq!(test_struct_do_something_that_fails(&test_struct), -1);
+
+    let err = test_struct_last_error();
+
+    assert!(err.is_some());
+
+    println!("Got error {:?}", err.unwrap());
 }
