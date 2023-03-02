@@ -41,8 +41,8 @@ impl ReturnFFIType {
             let name = Ident::new("out", Span::call_site());
 
             let PathArguments::AngleBracketed(ref args) = ffi_type.arguments else {
-                    return None;
-                };
+                return None;
+            };
 
             let Some(GenericArgument::Type(out_type)) = args.args.first() else {
                     return None;
