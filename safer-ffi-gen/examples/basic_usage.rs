@@ -1,23 +1,9 @@
-use safer_ffi::derive_ReprC;
-use safer_ffi_gen::{safer_ffi_gen, safer_ffi_gen_func};
+use safer_ffi_gen::{ffi_type, safer_ffi_gen, safer_ffi_gen_func};
 
-#[derive_ReprC]
-#[ReprC::opaque]
+#[ffi_type(opaque)]
 pub struct TestStruct {
     private_vec: Vec<u8>,
     private_string: String,
-}
-
-impl safer_ffi_gen::FfiType for TestStruct {
-    type Safe = safer_ffi::boxed::Box<TestStruct>;
-
-    fn from_safe(x: Self::Safe) -> Self {
-        *x.into()
-    }
-
-    fn into_safe(self) -> Self::Safe {
-        safer_ffi::boxed::Box::new(self)
-    }
 }
 
 #[safer_ffi_gen]
