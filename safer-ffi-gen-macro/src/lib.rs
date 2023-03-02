@@ -45,8 +45,8 @@ impl ReturnFFIType {
             };
 
             let Some(GenericArgument::Type(out_type)) = args.args.first() else {
-                    return None;
-                };
+                return None;
+            };
 
             if let Type::Tuple(tuple) = out_type {
                 if tuple.elems.is_empty() {
