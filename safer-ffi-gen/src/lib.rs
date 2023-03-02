@@ -36,6 +36,18 @@ impl_ffi_type_as_identity!(i64);
 impl_ffi_type_as_identity!(u64);
 impl_ffi_type_as_identity!(bool);
 
+impl<'a> FfiType for &'a str {
+    type Safe = safer_ffi::string::str_ref<'a>;
+
+    fn into_safe(self) -> Self::Safe {
+        self.into()
+    }
+
+    fn from_safe(x: Self::Safe) -> Self {
+        x.as_str()
+    }
+}
+
 impl FfiType for String {
     type Safe = safer_ffi::String;
 
@@ -45,6 +57,30 @@ impl FfiType for String {
 
     fn from_safe(x: Self::Safe) -> Self {
         x.into()
+    }
+}
+
+impl<'a, T: ReprC + 'a> FfiType for &'a [T] {
+    type Safe = safer_ffi::slice::slice_ref<'a, T>;
+
+    fn into_safe(self) -> Self::Safe {
+        self.into()
+    }
+
+    fn from_safe(x: Self::Safe) -> Self {
+        x.as_slice()
+    }
+}
+
+impl<'a, T: ReprC + 'a> FfiType for &'a mut [T] {
+    type Safe = safer_ffi::slice::slice_mut<'a, T>;
+
+    fn into_safe(self) -> Self::Safe {
+        self.into()
+    }
+
+    fn from_safe(x: Self::Safe) -> Self {
+        x.as_slice()
     }
 }
 
