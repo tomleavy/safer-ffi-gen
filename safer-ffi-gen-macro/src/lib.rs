@@ -167,10 +167,9 @@ impl ToTokens for FFIFunction {
         let input_names: Punctuated<Ident, Comma> =
             Punctuated::from_iter(self.parameters.iter().map(|arg| arg.name.clone()));
 
-        // TODO: Switch to safer_ffi::ffi_export
         quote! {
-            #[no_mangle]
-            pub extern "C" fn #ffi_function_name(#ffi_function_inputs) #ffi_function_output {
+            #[::safer_ffi_gen::safer_ffi::ffi_export]
+            pub fn #ffi_function_name(#ffi_function_inputs) #ffi_function_output {
                 #(#type_conversions)*
 
                 let res = #module_name::#function_name(#input_names);
@@ -280,6 +279,11 @@ fn process_ffi_type(
 
     let ty_def = syn::parse2::<syn::ItemStruct>(input)?;
     let ty = &ty_def.ident;
+    let ty_visibility = &ty_def.vis;
+    let drop_ident = Ident::new(
+        &format!("{}_free", ty.to_string().to_case(Case::Snake)),
+        Span::call_site(),
+    );
 
     Ok(quote! {
         #[::safer_ffi_gen::safer_ffi::derive_ReprC]
@@ -296,6 +300,11 @@ fn process_ffi_type(
             fn from_safe(x: Self::Safe) -> Self {
                 *x.into()
             }
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #ty_visibility fn #drop_ident(x: <#ty as ::safer_ffi_gen::FfiType>::Safe) {
+            ::core::mem::drop(x);
         }
     })
 }
