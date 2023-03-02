@@ -118,15 +118,12 @@ impl FFIFunction {
             return Err(syn::Error::new(method.span(), "async is not supported"));
         }
 
-        let parameters =
-            method
-                .sig
-                .inputs
-                .into_iter()
-                .try_fold(Punctuated::new(), |mut inputs, arg| {
-                    inputs.push(arg_to_ffi(&module_name, arg)?);
-                    Ok::<_, syn::Error>(inputs)
-                })?;
+        let parameters = method
+            .sig
+            .inputs
+            .into_iter()
+            .map(|arg| arg_to_ffi(&module_name, arg))
+            .collect::<Result<_, _>>()?;
 
         let output = match method.sig.output {
             ReturnType::Default => ReturnFFIType(None),
@@ -170,10 +167,9 @@ impl ToTokens for FFIFunction {
         let input_names: Punctuated<Ident, Comma> =
             Punctuated::from_iter(self.parameters.iter().map(|arg| arg.name.clone()));
 
-        // TODO: Switch to safer_ffi::ffi_export
         quote! {
-            #[no_mangle]
-            pub extern "C" fn #ffi_function_name(#ffi_function_inputs) #ffi_function_output {
+            #[::safer_ffi_gen::safer_ffi::ffi_export]
+            pub fn #ffi_function_name(#ffi_function_inputs) #ffi_function_output {
                 #(#type_conversions)*
 
                 let res = #module_name::#function_name(#input_names);
@@ -255,4 +251,60 @@ pub fn safer_ffi_gen_func(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     item
+}
+
+#[proc_macro_attribute]
+pub fn ffi_type(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    process_ffi_type(args.into(), input.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn process_ffi_type(
+    args: proc_macro2::TokenStream,
+    input: proc_macro2::TokenStream,
+) -> Result<proc_macro2::TokenStream, syn::Error> {
+    let args_span = args.span();
+
+    match &*syn::parse2::<Ident>(args)?.to_string() {
+        "opaque" => Ok(()),
+        s => Err(syn::Error::new(
+            args_span,
+            format!("Expected `opaque`, found {s}"),
+        )),
+    }?;
+
+    let ty_def = syn::parse2::<syn::ItemStruct>(input)?;
+    let ty = &ty_def.ident;
+    let ty_visibility = &ty_def.vis;
+    let drop_ident = Ident::new(
+        &format!("{}_free", ty.to_string().to_case(Case::Snake)),
+        Span::call_site(),
+    );
+
+    Ok(quote! {
+        #[::safer_ffi_gen::safer_ffi::derive_ReprC]
+        #[ReprC::opaque]
+        #ty_def
+
+        impl ::safer_ffi_gen::FfiType for #ty {
+            type Safe = ::safer_ffi_gen::safer_ffi::boxed::Box<#ty>;
+
+            fn into_safe(self) -> Self::Safe {
+                ::safer_ffi_gen::safer_ffi::boxed::Box::new(self)
+            }
+
+            fn from_safe(x: Self::Safe) -> Self {
+                *x.into()
+            }
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #ty_visibility fn #drop_ident(x: <#ty as ::safer_ffi_gen::FfiType>::Safe) {
+            ::core::mem::drop(x);
+        }
+    })
 }
