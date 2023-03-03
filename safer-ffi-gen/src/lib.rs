@@ -3,6 +3,11 @@ use safer_ffi::layout::ReprC;
 pub use safer_ffi;
 pub use safer_ffi_gen_macro::*;
 
+#[cfg(feature = "tokio")]
+mod async_util;
+
+pub use async_util::*;
+
 pub trait FfiType {
     type Safe;
 

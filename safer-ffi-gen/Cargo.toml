@@ -3,12 +3,19 @@ name = "safer-ffi-gen"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+tokio = ["dep:tokio", "dep:once_cell"]
+
 [dependencies]
 safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/"}
-safer-ffi = { version = "0.0.10", features = ["proc_macros", "out-refs"] }
+safer-ffi = { version = "0.0.10", features = ["proc_macros", "out-refs", "headers"] }
+tokio = {version = "1", features = ["rt-multi-thread"], optional = true}
+once_cell = { version = "1.9", optional = true }
 
 [dev-dependencies]
 trybuild = "1"
 
 [[example]]
 name = "basic_usage"
+required-features = ["tokio", "tokio/time"]
