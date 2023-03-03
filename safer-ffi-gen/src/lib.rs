@@ -108,6 +108,21 @@ impl<T: ReprC> FfiType for Box<T> {
     }
 }
 
+impl<T: ReprC> FfiType for Option<T>
+where
+    Option<T>: ReprC,
+{
+    type Safe = Option<T>;
+
+    fn into_safe(self) -> Self::Safe {
+        self
+    }
+
+    fn from_safe(x: Self::Safe) -> Self {
+        x
+    }
+}
+
 impl<'a, T: ReprC> FfiType for &'a T {
     type Safe = &'a T;
 
