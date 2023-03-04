@@ -35,6 +35,7 @@ impl_ffi_type_as_identity!(u32);
 impl_ffi_type_as_identity!(i64);
 impl_ffi_type_as_identity!(u64);
 impl_ffi_type_as_identity!(bool);
+impl_ffi_type_as_identity!(());
 
 impl<'a> FfiType for &'a str {
     type Safe = safer_ffi::string::str_ref<'a>;
