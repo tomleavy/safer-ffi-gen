@@ -1,4 +1,4 @@
-name: Cargo Build 
+name: Cargo Build
 on: [push, pull_request]
 jobs:
   BuildAndTest:
@@ -15,3 +15,5 @@ jobs:
       run: cargo clippy --all-targets --all-features --workspace -- -D warnings
     - name: Build Example
       run: cargo build --examples --features=tokio,tokio/time
+    - name: Test
+      run: cargo test --all-features --all-targets
