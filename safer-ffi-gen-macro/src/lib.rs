@@ -2,9 +2,9 @@ use convert_case::{Case, Casing};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg, GenericArgument,
-    ImplItem, ImplItemMethod, ItemImpl, Pat, PathArguments, PathSegment, ReturnType, Type,
-    TypePath, TypeReference,
+    fold::Fold, parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg,
+    GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Pat, PathArguments, PathSegment,
+    ReturnType, Type, TypePath, TypeReference,
 };
 
 #[derive(Debug, Clone)]
@@ -13,9 +13,36 @@ struct FFIType {
 }
 
 impl FFIType {
-    fn new(native_type: Type) -> Self {
+    fn new(native_type: Type, self_ty: Type) -> Self {
+        Self {
+            native_type: resolve_self(native_type, self_ty),
+        }
+    }
+
+    fn new_no_self(native_type: Type) -> Self {
         Self { native_type }
     }
+}
+
+struct SelfResolver(Type);
+
+impl Fold for SelfResolver {
+    fn fold_type(&mut self, i: Type) -> Type {
+        match &i {
+            Type::Path(p) => p
+                .path
+                .segments
+                .first()
+                .filter(|segment| p.path.segments.len() == 1 && segment.ident == "Self")
+                .map(|_| self.0.clone())
+                .unwrap_or_else(|| syn::fold::fold_type(self, i)),
+            _ => syn::fold::fold_type(self, i),
+        }
+    }
+}
+
+fn resolve_self(ty: Type, self_ty: Type) -> Type {
+    SelfResolver(self_ty).fold_type(ty)
 }
 
 #[derive(Debug)]
@@ -56,7 +83,7 @@ impl ReturnFFIType {
 
             Some(FFIArgument {
                 name,
-                ffi_type: FFIType::new(out_type.clone()),
+                ffi_type: FFIType::new_no_self(out_type.clone()),
                 is_out: true,
             })
         })
@@ -141,7 +168,7 @@ fn arg_to_ffi(module_name: &TypePath, arg: FnArg) -> syn::Result<FFIArgument> {
 
             Ok(FFIArgument {
                 name: Ident::new("this", Span::call_site()),
-                ffi_type: FFIType::new(ty),
+                ffi_type: FFIType::new(ty, Type::Path(module_name.clone())),
                 is_out: false,
             })
         }
@@ -152,7 +179,7 @@ fn arg_to_ffi(module_name: &TypePath, arg: FnArg) -> syn::Result<FFIArgument> {
 
             Ok(FFIArgument {
                 name: ident.ident.clone(),
-                ffi_type: FFIType::new((*pat_type.ty).clone()),
+                ffi_type: FFIType::new((*pat_type.ty).clone(), Type::Path(module_name.clone())),
                 is_out: false,
             })
         }
@@ -179,7 +206,9 @@ impl FFIFunction {
 
         let output = match method.sig.output {
             ReturnType::Default => ReturnFFIType(None),
-            ReturnType::Type(_, otype) => ReturnFFIType(Some(FFIType::new(*otype))),
+            ReturnType::Type(_, otype) => {
+                ReturnFFIType(Some(FFIType::new(*otype, Type::Path(module_name.clone()))))
+            }
         };
 
         if let Some(out_arg) = output.out_arg() {
