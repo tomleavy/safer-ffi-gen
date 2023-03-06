@@ -1,5 +1,5 @@
 use convert_case::{Case, Casing};
-use proc_macro2::{Ident, Span};
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg, GenericArgument,
@@ -165,15 +165,11 @@ struct FFIFunction {
     function_name: Ident,
     parameters: Punctuated<FFIArgument, Comma>,
     output: ReturnFFIType,
+    is_async: bool,
 }
 
 impl FFIFunction {
     fn new(module_name: TypePath, method: ImplItemMethod) -> syn::Result<Self> {
-        // TODO: Support async
-        if method.sig.asyncness.is_some() {
-            return Err(syn::Error::new(method.span(), "async is not supported"));
-        }
-
         let mut parameters = method
             .sig
             .inputs
@@ -195,6 +191,7 @@ impl FFIFunction {
             function_name: method.sig.ident,
             parameters,
             output,
+            is_async: method.sig.asyncness.is_some(),
         })
     }
 
@@ -208,22 +205,76 @@ impl FFIFunction {
             self.function_name
         )
     }
-}
 
-impl ToTokens for FFIFunction {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let ffi_function_name = self.ffi_function_name();
-        let ffi_function_inputs = &self.parameters;
-        let ffi_function_output = &self.output;
+    fn convert_output_with_result(&self) -> TokenStream {
+        let module_name = &self.module_name;
+
+        let handle_success = if self.output.out_arg().is_some() {
+            quote! {
+                out.write(::safer_ffi_gen::FfiType::into_safe(output));
+                0
+            }
+        } else {
+            quote! {0}
+        };
+
+        let handle_error = quote! {
+            #module_name::set_last_error(err);
+            -1
+        };
+
+        quote! {
+            match res {
+                Ok(output) => {
+                    #handle_success
+                }
+                Err(err) => {
+                    #handle_error
+                },
+            }
+        }
+    }
+
+    fn convert_output_no_result(&self) -> TokenStream {
+        quote! {
+            ::safer_ffi_gen::FfiType::into_safe(res)
+        }
+    }
+
+    fn convert_output(&self) -> TokenStream {
+        if self.output.is_result() {
+            self.convert_output_with_result()
+        } else {
+            self.convert_output_no_result()
+        }
+    }
+
+    fn method_impl_async_blocking(
+        &self,
+        module_name: &TypePath,
+        function_name: &Ident,
+        input_names: &Punctuated<Ident, Comma>,
+    ) -> TokenStream {
+        quote! {
+            let res = safer_ffi_gen::BLOCKING_ASYNC_RUNTIME
+                .block_on(#module_name::#function_name(#input_names));
+        }
+    }
+
+    fn method_impl_sync(
+        &self,
+        module_name: &TypePath,
+        function_name: &Ident,
+        input_names: &Punctuated<Ident, Comma>,
+    ) -> TokenStream {
+        quote! {
+            let res = #module_name::#function_name(#input_names);
+        }
+    }
+
+    fn method_impl(&self) -> TokenStream {
         let module_name = &self.module_name;
         let function_name = &self.function_name;
-
-        let type_conversions = self
-            .parameters
-            .iter()
-            .filter(|arg| !arg.is_out)
-            .cloned()
-            .map(FFIArgumentConversion::new);
 
         let input_names: Punctuated<Ident, Comma> = Punctuated::from_iter(
             self.parameters
@@ -232,45 +283,37 @@ impl ToTokens for FFIFunction {
                 .map(|arg| arg.name.clone()),
         );
 
-        let result_handling = if self.output.is_result() {
-            let handle_success = if self.output.out_arg().is_some() {
-                quote! {
-                    out.write(::safer_ffi_gen::FfiType::into_safe(output));
-                    0
-                }
-            } else {
-                quote! {0}
-            };
-
-            let handle_error = quote! {
-                #module_name::set_last_error(err);
-                -1
-            };
-
-            quote! {
-                match res {
-                    Ok(output) => {
-                        #handle_success
-                    }
-                    Err(err) => {
-                        #handle_error
-                    },
-                }
-            }
+        if self.is_async {
+            self.method_impl_async_blocking(module_name, function_name, &input_names)
         } else {
-            quote! {
-                ::safer_ffi_gen::FfiType::into_safe(res)
-            }
-        };
+            self.method_impl_sync(module_name, function_name, &input_names)
+        }
+    }
+}
+
+impl ToTokens for FFIFunction {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let ffi_function_name = self.ffi_function_name();
+        let ffi_function_inputs = &self.parameters;
+        let ffi_function_output = &self.output;
+
+        let type_conversions = self
+            .parameters
+            .iter()
+            .filter(|arg| !arg.is_out)
+            .cloned()
+            .map(FFIArgumentConversion::new);
+
+        let method_impl = self.method_impl();
+        let convert_output = self.convert_output();
 
         quote! {
             #[::safer_ffi_gen::safer_ffi::ffi_export]
             pub fn #ffi_function_name(#ffi_function_inputs) #ffi_function_output {
                 #(#type_conversions)*
 
-                let res = #module_name::#function_name(#input_names);
-
-                #result_handling
+                #method_impl
+                #convert_output
             }
         }
         .to_tokens(tokens)

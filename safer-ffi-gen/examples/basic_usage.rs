@@ -1,4 +1,4 @@
-use std::io::ErrorKind;
+use std::{io::ErrorKind, time::Duration};
 
 use safer_ffi_gen::{ffi_type, safer_ffi_gen, safer_ffi_gen_func};
 
@@ -62,6 +62,16 @@ impl TestStruct {
     pub fn inner_str(&self) -> &str {
         &self.private_string
     }
+
+    #[safer_ffi_gen_func]
+    pub async fn do_something_async(&self) -> i32 {
+        tokio::spawn(async {
+            tokio::time::sleep(Duration::from_millis(3000)).await;
+            42
+        })
+        .await
+        .unwrap()
+    }
 }
 
 pub fn main() {
@@ -74,4 +84,7 @@ pub fn main() {
     assert!(err.is_some());
 
     println!("Got error {:?}", err.unwrap());
+
+    let async_res = test_struct_do_something_async(&test_struct);
+    assert_eq!(async_res, 42);
 }

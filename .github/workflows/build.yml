@@ -14,4 +14,4 @@ jobs:
     - name: Clippy
       run: cargo clippy --all-targets --all-features --workspace -- -D warnings
     - name: Build Example
-      run: cargo build --examples
+      run: cargo build --examples --features=tokio,tokio/time
