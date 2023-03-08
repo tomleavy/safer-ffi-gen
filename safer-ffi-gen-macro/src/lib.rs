@@ -2,9 +2,9 @@ use convert_case::{Case, Casing};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    fold::Fold, parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg,
-    GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Pat, PathArguments, PathSegment,
-    ReturnType, Type, TypePath, TypeReference,
+    fold::Fold, parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma,
+    AttributeArgs, FnArg, GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta,
+    Pat, PathArguments, PathSegment, ReturnType, Type, TypePath, TypeReference,
 };
 
 #[derive(Debug, Clone)]
@@ -426,38 +426,60 @@ pub fn ffi_type(
     args: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    process_ffi_type(args.into(), input.into())
+    let args = syn::parse_macro_input!(args as AttributeArgs);
+    let ty_def = syn::parse_macro_input!(input as syn::ItemStruct);
+
+    process_ffi_type(args, ty_def)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
 
 fn process_ffi_type(
-    args: proc_macro2::TokenStream,
-    input: proc_macro2::TokenStream,
+    args: AttributeArgs,
+    ty_def: syn::ItemStruct,
 ) -> Result<proc_macro2::TokenStream, syn::Error> {
-    let args_span = args.span();
+    let args = args
+        .into_iter()
+        .try_fold(FfiTypeArgs::default(), |mut acc, arg| match arg {
+            NestedMeta::Meta(Meta::Path(p)) => {
+                match &*p.get_ident().map(ToString::to_string).unwrap_or_default() {
+                    "opaque" => {
+                        acc.opaque = true;
+                        Ok(acc)
+                    }
+                    "clone" => {
+                        acc.clone = true;
+                        Ok(acc)
+                    }
+                    _ => Err(syn::Error::new_spanned(p, "Unknown argument")),
+                }
+            }
+            _ => Err(syn::Error::new_spanned(arg, "Unknown argument")),
+        })?;
 
-    match &*syn::parse2::<Ident>(args)?.to_string() {
-        "opaque" => Ok(()),
-        s => Err(syn::Error::new(
-            args_span,
-            format!("Expected `opaque`, found {s}"),
-        )),
-    }?;
+    args.opaque.then_some(()).ok_or_else(|| {
+        syn::Error::new(Span::call_site(), "`opaque` must be specified as argument")
+    })?;
 
-    let ty_def = syn::parse2::<syn::ItemStruct>(input)?;
     let ty = &ty_def.ident;
     let ty_visibility = &ty_def.vis;
+    let ty_prefix = ty.to_string().to_case(Case::Snake);
+    let drop_ident = Ident::new(&format!("{ty_prefix}_free"), Span::call_site());
 
-    let drop_ident = Ident::new(
-        &format!("{}_free", ty.to_string().to_case(Case::Snake)),
-        Span::call_site(),
-    );
+    let clone_fn = args.clone.then(|| {
+        let clone_ident = Ident::new(&format!("{ty_prefix}_clone"), Span::call_site());
 
-    let last_error_ident = Ident::new(
-        &format!("{}_last_error", ty.to_string().to_case(Case::Snake)),
-        Span::call_site(),
-    );
+        quote! {
+            #[::safer_ffi_gen::safer_ffi::ffi_export]
+            #ty_visibility fn #clone_ident(
+                x: <&#ty as ::safer_ffi_gen::FfiType>::Safe,
+            ) -> <#ty as ::safer_ffi_gen::FfiType>::Safe {
+                ::safer_ffi_gen::safer_ffi::boxed::Box::new(::std::clone::Clone::clone(x))
+            }
+        }
+    });
+
+    let last_error_ident = Ident::new(&format!("{ty_prefix}_last_error"), Span::call_site());
 
     Ok(quote! {
         #[::safer_ffi_gen::safer_ffi::derive_ReprC]
@@ -481,6 +503,8 @@ fn process_ffi_type(
             ::core::mem::drop(x);
         }
 
+        #clone_fn
+
         #[::safer_ffi_gen::safer_ffi::ffi_export]
         #ty_visibility fn #last_error_ident() -> Option<::safer_ffi::prelude::repr_c::String> {
             #ty::LAST_ERROR.with(|prev| {
@@ -500,4 +524,10 @@ fn process_ffi_type(
             }
         }
     })
+}
+
+#[derive(Debug, Default)]
+struct FfiTypeArgs {
+    opaque: bool,
+    clone: bool,
 }
