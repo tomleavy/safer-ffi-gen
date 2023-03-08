@@ -6,6 +6,7 @@ pub use safer_ffi_gen_macro::*;
 #[cfg(feature = "tokio")]
 mod async_util;
 
+#[cfg(feature = "tokio")]
 pub use async_util::*;
 
 pub trait FfiType {
