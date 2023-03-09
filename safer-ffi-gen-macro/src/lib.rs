@@ -356,8 +356,8 @@ struct FFIModule {
 
 impl FFIModule {
     pub fn new(impl_block: ItemImpl) -> syn::Result<Self> {
-        let Type::Path(path) = *impl_block.self_ty.clone() else {
-            return Err(syn::Error::new(impl_block.span(), "impl block must be for a struct"));
+        let Type::Path(path) = &*impl_block.self_ty else {
+            return Err(syn::Error::new(impl_block.span(), "impl block must be for a type path"));
         };
 
         // Find functions
@@ -401,14 +401,14 @@ pub fn safer_ffi_gen(
     _attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let mut item = proc_macro2::TokenStream::from(item);
+    let mut result = proc_macro2::TokenStream::from(item.clone());
 
-    let output = syn::parse2::<FFIModule>(item.clone()).unwrap();
+    let output = syn::parse_macro_input!(item as FFIModule);
 
     // Add the output to the input
-    output.to_tokens(&mut item);
+    output.to_tokens(&mut result);
 
-    proc_macro::TokenStream::from(item)
+    result.into()
 }
 
 #[proc_macro_attribute]
@@ -458,7 +458,10 @@ fn process_ffi_type(
         })?;
 
     args.opaque.then_some(()).ok_or_else(|| {
-        syn::Error::new(Span::call_site(), "`opaque` must be specified as argument")
+        syn::Error::new(
+            Span::call_site(),
+            "`opaque` must be specified as argument to `ffi_type`",
+        )
     })?;
 
     let ty = &ty_def.ident;
