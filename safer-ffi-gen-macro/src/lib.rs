@@ -2,10 +2,12 @@ use convert_case::{Case, Casing};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    fold::Fold, parse::Parse, punctuated::Punctuated, spanned::Spanned, token::Comma,
-    AttributeArgs, FnArg, GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta,
-    Pat, PathArguments, PathSegment, ReturnType, Type, TypePath, TypeReference,
+    fold::Fold, parse::Parse, punctuated::Punctuated, token::Comma, Attribute, AttributeArgs,
+    FnArg, GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta, Pat,
+    PathArguments, PathSegment, ReturnType, Type, TypePath, TypeReference,
 };
+
+const EXPORT_MARKER: &str = "safer_ffi_gen_func";
 
 #[derive(Debug, Clone)]
 struct FFIType {
@@ -356,8 +358,18 @@ struct FFIModule {
 
 impl FFIModule {
     pub fn new(impl_block: ItemImpl) -> syn::Result<Self> {
+        if let Some((_, trait_, _)) = impl_block.trait_ {
+            return Err(syn::Error::new_spanned(
+                trait_,
+                "safer_ffi_gen does not support trait implementations",
+            ));
+        }
+
         let Type::Path(path) = &*impl_block.self_ty else {
-            return Err(syn::Error::new(impl_block.span(), "impl block must be for a type path"));
+            return Err(syn::Error::new_spanned(
+                &impl_block.self_ty,
+                "impl block must be for a type path",
+            ));
         };
 
         // Find functions
@@ -365,16 +377,19 @@ impl FFIModule {
             .items
             .into_iter()
             .filter_map(|item| match item {
-                ImplItem::Method(method) => method
-                    .attrs
-                    .iter()
-                    .any(|attr| {
-                        attr.path
-                            .segments
-                            .iter()
-                            .any(|segment| segment.ident == "safer_ffi_gen_func")
+                ImplItem::Method(method) => exported(&method.attrs)
+                    .is_some()
+                    .then(|| FFIFunction::new(path.clone(), method)),
+                ImplItem::Const(syn::ImplItemConst { attrs, .. })
+                | ImplItem::Type(syn::ImplItemType { attrs, .. })
+                | ImplItem::Macro(syn::ImplItemMacro { attrs, .. }) => {
+                    exported(&attrs).map(|marker| {
+                        Err(syn::Error::new_spanned(
+                            marker,
+                            "Only functions can be exported by safer_ffi_gen",
+                        ))
                     })
-                    .then_some(FFIFunction::new(path.clone(), method)),
+                }
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -394,6 +409,14 @@ impl Parse for FFIModule {
         let impl_block = input.parse::<ItemImpl>()?;
         FFIModule::new(impl_block)
     }
+}
+
+fn exported(attrs: &[Attribute]) -> Option<&Ident> {
+    attrs.iter().find_map(|attr| {
+        attr.path
+            .get_ident()
+            .filter(|&ident| ident == EXPORT_MARKER)
+    })
 }
 
 #[proc_macro_attribute]
