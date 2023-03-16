@@ -7,7 +7,7 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-convert_case = "0.6"
+heck = "0.4.1"
 proc-macro-error = "1"
 proc-macro2 = "1"
 quote = "1"

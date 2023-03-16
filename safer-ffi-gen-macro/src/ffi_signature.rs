@@ -1,5 +1,5 @@
 use crate::{type_path_last_ident, Error, ErrorReason};
-use convert_case::{Case, Casing};
+use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use std::{collections::HashMap, fmt::Display};
@@ -83,11 +83,7 @@ impl FfiSignature {
     }
 
     pub fn prefix_with_type(&mut self, type_path: &TypePath) {
-        self.prefix_name(
-            type_path_last_ident(type_path)
-                .to_string()
-                .to_case(Case::Snake),
-        );
+        self.prefix_name(type_path_last_ident(type_path).to_string().to_snake_case());
     }
 
     fn prefix_name<T: Display>(&mut self, prefix: T) {
