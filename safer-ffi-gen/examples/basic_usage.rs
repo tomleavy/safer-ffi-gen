@@ -79,11 +79,9 @@ pub fn main() {
 
     assert_eq!(test_struct_do_something_that_fails(&test_struct), -1);
 
-    let err = test_struct_last_error();
+    let err: String = ::safer_ffi_gen::last_error().into();
 
-    assert!(err.is_some());
-
-    println!("Got error {:?}", err.unwrap());
+    println!("Got error {}", err);
 
     let async_res = test_struct_do_something_async(&test_struct);
     assert_eq!(async_res, 42);
