@@ -1,10 +1,10 @@
-use safer_ffi_gen::{safer_ffi_gen, safer_ffi_gen_func};
+use safer_ffi_gen::safer_ffi_gen;
 
 struct Foo;
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen_func]
+    #[safer_ffi_gen]
     fn append(mut v: Vec<u8>, x: u8) -> Vec<u8> {
         v.push(x);
         v

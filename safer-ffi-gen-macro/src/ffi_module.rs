@@ -8,8 +8,11 @@ use std::mem::take;
 use syn::{
     parse::{Parse, ParseStream},
     Attribute, GenericArgument, GenericParam, Generics, Ident, ImplItem, ImplItemConst,
-    ImplItemMacro, ImplItemType, ItemImpl, PathArguments, Signature, Type, TypePath,
+    ImplItemMacro, ImplItemMethod, ImplItemType, ItemImpl, PathArguments, Signature, Type,
+    TypePath,
 };
+
+const EXPORT_MARKER: &str = "safer_ffi_gen";
 
 #[derive(Debug)]
 pub struct FfiModule {
@@ -90,7 +93,7 @@ impl FfiModule {
         let mini_impl_block = quote! {
             impl #impl_generics  #type_path #where_clause {
                 #(
-                    #[safer_ffi_gen_func]
+                    #[safer_ffi_gen]
                     #functions {}
                 )*
             }
@@ -125,8 +128,6 @@ impl Parse for FfiModule {
 }
 
 fn exported(attrs: &[Attribute]) -> Option<&Ident> {
-    const EXPORT_MARKER: &str = "safer_ffi_gen_func";
-
     attrs.iter().find_map(|attr| {
         attr.path
             .get_ident()
@@ -150,4 +151,36 @@ fn type_parameters(type_path: &TypePath) -> impl Iterator<Item = &Type> {
         })
         .into_iter()
         .flatten()
+}
+
+#[derive(Debug)]
+pub struct FfiModuleInput {
+    impl_block: ItemImpl,
+}
+
+impl Parse for FfiModuleInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut impl_block = ItemImpl::parse(input)?;
+        impl_block
+            .items
+            .iter_mut()
+            .flat_map(|item| match item {
+                ImplItem::Const(ImplItemConst { attrs, .. })
+                | ImplItem::Macro(ImplItemMacro { attrs, .. })
+                | ImplItem::Method(ImplItemMethod { attrs, .. })
+                | ImplItem::Type(ImplItemType { attrs, .. }) => Some(attrs),
+                _ => None,
+            })
+            .for_each(|attrs| {
+                attrs.retain(|attr| attr.path.get_ident().map_or(true, |id| id != EXPORT_MARKER))
+            });
+
+        Ok(Self { impl_block })
+    }
+}
+
+impl ToTokens for FfiModuleInput {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.impl_block.to_tokens(tokens);
+    }
 }

@@ -1,15 +1,15 @@
-use safer_ffi_gen::{safer_ffi_gen, safer_ffi_gen_func};
+use safer_ffi_gen::safer_ffi_gen;
 
 struct Foo;
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen_func]
+    #[safer_ffi_gen]
     pub fn identity_str(s: &str) -> &str {
         s
     }
 
-    #[safer_ffi_gen_func]
+    #[safer_ffi_gen]
     pub fn append(mut prefix: String, suffix: &str) -> String {
         prefix.push_str(suffix);
         prefix

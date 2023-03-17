@@ -1,10 +1,10 @@
-use safer_ffi_gen::{safer_ffi_gen, safer_ffi_gen_func};
+use safer_ffi_gen::safer_ffi_gen;
 
 pub struct Foo;
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen_func]
+    #[safer_ffi_gen]
     pub fn foo() {}
 }
 

@@ -1,4 +1,4 @@
-use safer_ffi_gen::{ffi_type, safer_ffi_gen, safer_ffi_gen_func};
+use safer_ffi_gen::{ffi_type, safer_ffi_gen};
 
 #[ffi_type(opaque)]
 pub struct Foo<T> {
@@ -7,12 +7,12 @@ pub struct Foo<T> {
 
 #[safer_ffi_gen]
 impl<T> Foo<T> {
-    #[safer_ffi_gen_func]
+    #[safer_ffi_gen]
     pub fn new(x: T) -> Self {
         Self { x }
     }
 
-    #[safer_ffi_gen_func]
+    #[safer_ffi_gen]
     pub fn get(&self) -> &T {
         &self.x
     }

@@ -1,5 +1,5 @@
 use proc_macro2::{Ident, Span};
-use quote::ToTokens;
+use quote::{quote, ToTokens};
 use syn::{parse_macro_input, spanned::Spanned, AttributeArgs, GenericParam, Generics, TypePath};
 
 mod error;
@@ -11,7 +11,7 @@ mod specialization;
 mod test_utils;
 
 use error::{Error, ErrorReason};
-use ffi_module::FfiModule;
+use ffi_module::{FfiModule, FfiModuleInput};
 use ffi_signature::FfiSignature;
 use ffi_type::process_ffi_type;
 use specialization::{Specialization, SpecializationDecl};
@@ -21,24 +21,15 @@ pub fn safer_ffi_gen(
     _attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let mut result = proc_macro2::TokenStream::from(item.clone());
-
+    let input = item.clone();
+    let input = parse_macro_input!(input as FfiModuleInput);
     let output = parse_macro_input!(item as FfiModule);
 
-    // Add the output to the input
-    output.to_tokens(&mut result);
-
-    result.into()
-}
-
-#[proc_macro_attribute]
-// TODO: This isn't necessary, but it is easier for now with debugging to avoid
-// having to filter out recursive safer_ffi_gen inside an impl
-pub fn safer_ffi_gen_func(
-    _attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    item
+    quote! {
+        #input
+        #output
+    }
+    .into()
 }
 
 #[proc_macro_attribute]
