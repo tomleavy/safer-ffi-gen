@@ -1,4 +1,5 @@
 use safer_ffi::layout::ReprC;
+use std::cell::RefCell;
 
 pub use safer_ffi;
 pub use safer_ffi_gen_macro::*;
@@ -115,7 +116,7 @@ impl<T: ReprC> FfiType for Box<T> {
     }
 }
 
-impl<T: ReprC> FfiType for Option<T>
+impl<T> FfiType for Option<T>
 where
     Option<T>: ReprC,
 {
@@ -152,4 +153,27 @@ impl<'a, T: ReprC> FfiType for &'a mut T {
     fn from_safe(x: Self::Safe) -> Self {
         x
     }
+}
+
+thread_local! {
+    static LAST_ERROR: RefCell<Option<Box<dyn std::error::Error>>> = RefCell::new(None);
+}
+
+pub fn set_last_error<E>(e: E)
+where
+    E: Into<Box<dyn std::error::Error>>,
+{
+    LAST_ERROR.with(|last_error| *last_error.borrow_mut() = Some(e.into()));
+}
+
+#[safer_ffi::ffi_export]
+pub fn last_error() -> safer_ffi::String {
+    LAST_ERROR
+        .with(|e| {
+            e.borrow()
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default()
+        })
+        .into()
 }
