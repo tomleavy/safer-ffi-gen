@@ -1,5 +1,5 @@
 use crate::{type_path_last_ident, FfiModule};
-use convert_case::{Case, Casing};
+use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{
@@ -46,9 +46,7 @@ pub fn specialization_macro_ident(type_path: &TypePath) -> Ident {
     Ident::new(
         &format!(
             "__safer_ffi_gen_specialize_{}",
-            type_path_last_ident(type_path)
-                .to_string()
-                .to_case(Case::Snake),
+            type_path_last_ident(type_path).to_string().to_snake_case(),
         ),
         Span::call_site(),
     )

@@ -22,6 +22,6 @@ safer_ffi_gen::specialize! { FooI32 = Foo<i32> }
 
 #[test]
 fn specialization_works() {
-    let x = foo_i_32_new(33);
-    assert_eq!(*foo_i_32_get(&x), 33);
+    let x = foo_i32_new(33);
+    assert_eq!(*foo_i32_get(&x), 33);
 }

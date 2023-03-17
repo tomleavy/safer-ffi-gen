@@ -1,5 +1,5 @@
 use crate::{has_only_lifetime_parameters, Error, ErrorReason};
-use convert_case::{Case, Casing};
+use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{AttributeArgs, Generics, Ident, ItemStruct, Meta, NestedMeta, Visibility};
@@ -126,7 +126,7 @@ fn export_drop(ty: &Ident, type_visibility: &Visibility, generics: &Generics) ->
 }
 
 fn fn_prefix(ty: &Ident) -> String {
-    ty.to_string().to_case(Case::Snake)
+    ty.to_string().to_snake_case()
 }
 
 #[cfg(test)]
