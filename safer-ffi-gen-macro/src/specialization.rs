@@ -24,13 +24,21 @@ impl Parse for SpecializationDecl {
 
 impl ToTokens for SpecializationDecl {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let mut macro_path = self.target.path.clone();
-
-        let last_segment = macro_path
-            .segments
-            .last_mut()
-            .expect("Path must have at least one segment");
-        *last_segment = specialization_macro_ident(&self.target).into();
+        let macro_path = if self.target.path.segments.len() < 2
+            || self.target.path.segments[0].ident == "crate"
+        {
+            specialization_macro_ident(&self.target).into()
+        } else {
+            syn::Path {
+                leading_colon: self.target.path.leading_colon,
+                segments: [
+                    self.target.path.segments[0].clone(),
+                    specialization_macro_ident(&self.target).into(),
+                ]
+                .into_iter()
+                .collect(),
+            }
+        };
 
         let alias = &self.alias;
         let target = &self.target;

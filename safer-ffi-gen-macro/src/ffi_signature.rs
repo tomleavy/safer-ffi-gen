@@ -1,4 +1,6 @@
-use crate::{type_path_last_ident, Error, ErrorReason};
+use crate::{
+    replace_type_path_constructor, type_path_constructor, type_path_last_ident, Error, ErrorReason,
+};
 use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
@@ -97,14 +99,31 @@ impl FfiSignature {
     }
 
     pub fn replace_types(&mut self, replacements: &HashMap<Type, Type>) {
-        replace_types(&mut self.self_type, replacements);
+        self.edit_types(&mut TypeReplacer { replacements });
+    }
+
+    pub fn replace_type_constructors(&mut self, replacements: &HashMap<TypePath, TypePath>) {
+        self.edit_types(&mut TypePathReplacer { replacements });
+    }
+
+    pub fn all_types(&self) -> impl Iterator<Item = &Type> {
+        std::iter::once(&self.self_type)
+            .chain(self.params.iter().map(|(_, ty)| ty))
+            .chain(match &self.return_type {
+                ReturnType::Default => None,
+                ReturnType::Type(_, ty) => Some(&**ty),
+            })
+    }
+
+    pub fn edit_types<V: VisitMut>(&mut self, visitor: &mut V) {
+        visitor.visit_type_mut(&mut self.self_type);
 
         self.params
             .iter_mut()
-            .for_each(|(_, ty)| replace_types(ty, replacements));
+            .for_each(|(_, ty)| visitor.visit_type_mut(ty));
 
         if let ReturnType::Type(_, ty) = &mut self.return_type {
-            replace_types(ty, replacements);
+            visitor.visit_type_mut(ty);
         }
     }
 
@@ -215,7 +234,7 @@ impl ToTokens for FfiSignature {
 
         quote! {
             #[::safer_ffi_gen::safer_ffi::ffi_export]
-            #signature {
+            pub #signature {
                 #(#arg_conversions)*
 
                 let #return_value = #call;
@@ -320,10 +339,6 @@ fn self_type_replacement(self_type: Type) -> HashMap<Type, Type> {
     [(literally_self_type(), self_type)].into_iter().collect()
 }
 
-fn replace_types(ty: &mut Type, replacements: &HashMap<Type, Type>) {
-    TypeReplacer { replacements }.visit_type_mut(ty)
-}
-
 #[derive(Debug)]
 struct TypeReplacer<'a> {
     replacements: &'a HashMap<Type, Type>,
@@ -335,6 +350,21 @@ impl VisitMut for TypeReplacer<'_> {
             *ty = new_ty;
         }
         syn::visit_mut::visit_type_mut(self, ty);
+    }
+}
+
+#[derive(Debug)]
+struct TypePathReplacer<'a> {
+    replacements: &'a HashMap<TypePath, TypePath>,
+}
+
+impl VisitMut for TypePathReplacer<'_> {
+    fn visit_type_path_mut(&mut self, ty: &mut TypePath) {
+        let ty_ctor = type_path_constructor(ty);
+        if let Some(new_ty_ctor) = self.replacements.get(&ty_ctor) {
+            replace_type_path_constructor(ty, new_ty_ctor);
+        }
+        syn::visit_mut::visit_type_path_mut(self, ty);
     }
 }
 
@@ -435,12 +465,21 @@ fn return_value_name() -> Ident {
 mod tests {
     use crate::{
         ffi_signature::{
-            output_param_name, replace_types, result_ok_type, type_is_unit, FfiSignature,
+            output_param_name, result_ok_type, type_is_unit, FfiSignature, TypeReplacer,
         },
         test_utils::Pretty,
     };
     use assert2::assert;
-    use syn::{parse_quote, Signature, Type};
+    use std::collections::HashSet;
+    use syn::{parse_quote, visit_mut::VisitMut, Signature, Type};
+
+    fn replace_types(mut ty: Type, replacements: &[(Type, Type)]) -> Type {
+        TypeReplacer {
+            replacements: &replacements.iter().cloned().collect(),
+        }
+        .visit_type_mut(&mut ty);
+        ty
+    }
 
     #[test]
     fn unit_type_is_recognized() {
@@ -480,8 +519,7 @@ mod tests {
     fn replacing_single_type_works() {
         let old_ty: Type = parse_quote! { Foo };
         let new_ty: Type = parse_quote! { Bar };
-        let mut ty = old_ty.clone();
-        replace_types(&mut ty, &[(old_ty, new_ty.clone())].into_iter().collect());
+        let ty = replace_types(old_ty.clone(), &[(old_ty, new_ty.clone())]);
         assert!(ty == new_ty);
     }
 
@@ -489,9 +527,9 @@ mod tests {
     fn replacing_multiple_types_works() {
         let (foo, bar): (Type, Type) = (parse_quote! { Foo }, parse_quote! { Bar });
         let (baz, quux): (Type, Type) = (parse_quote! { Baz }, parse_quote! { Quux });
-        let mut ty: Type = parse_quote! { (#foo, #bar) };
+        let ty: Type = parse_quote! { (#foo, #bar) };
         let expected: Type = parse_quote! { (#baz, #quux) };
-        replace_types(&mut ty, &[(foo, baz), (bar, quux)].into_iter().collect());
+        let ty = replace_types(ty, &[(foo, baz), (bar, quux)]);
         assert!(ty == expected);
     }
 
@@ -499,9 +537,9 @@ mod tests {
     fn replacing_type_in_type_param_works() {
         let old_type: Type = parse_quote! { Foo };
         let new_type: Type = parse_quote! { Bar };
-        let mut ty: Type = parse_quote! { Vec<Foo> };
+        let ty: Type = parse_quote! { Vec<Foo> };
         let expected: Type = parse_quote! { Vec<Bar> };
-        replace_types(&mut ty, &[(old_type, new_type)].into_iter().collect());
+        let ty = replace_types(ty, &[(old_type, new_type)]);
         assert!(ty == expected);
     }
 
@@ -549,5 +587,25 @@ mod tests {
         let expected_signature: Signature = parse_quote! { fn bar() -> ::std::ffi::c_int };
         let actual_signature = Signature::from(signature);
         assert!(actual_signature == expected_signature);
+    }
+
+    #[test]
+    fn extracting_all_types_works() {
+        let signature = FfiSignature::parse(
+            parse_quote! { Foo },
+            parse_quote! { fn bar(x: Bar) -> Result<i32, ()> },
+        )
+        .unwrap();
+
+        let expected_types: HashSet<Type> = [
+            parse_quote! { Foo },
+            parse_quote! { Bar },
+            parse_quote! { Result<i32, ()> },
+        ]
+        .into_iter()
+        .collect();
+
+        let actual_types = signature.all_types().cloned().collect::<HashSet<_>>();
+        assert!(actual_types == expected_types);
     }
 }

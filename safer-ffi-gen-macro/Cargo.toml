@@ -11,7 +11,7 @@ heck = "0.4.1"
 proc-macro-error = "1"
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "1", features = ["extra-traits", "fold", "full", "visit-mut"] }
+syn = { version = "1", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 thiserror = "1.0.39"
 
 [dev-dependencies]
