@@ -2,26 +2,30 @@ use crate::{has_only_lifetime_parameters, Error, ErrorReason};
 use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
-use syn::{AttributeArgs, Generics, Ident, ItemStruct, Meta, NestedMeta, Visibility};
+use syn::{punctuated::Punctuated, Generics, Ident, ItemStruct, Meta, Token, Visibility};
 
-pub fn process_ffi_type(args: AttributeArgs, type_def: ItemStruct) -> Result<FfiTypeOutput, Error> {
+pub fn process_ffi_type(
+    args: Punctuated<Meta, Token![,]>,
+    type_def: ItemStruct,
+) -> Result<FfiTypeOutput, Error> {
     let has_only_lifetime_params = has_only_lifetime_parameters(&type_def.generics);
 
     let args = args
         .iter()
         .try_fold(FfiTypeArgs::default(), |mut acc, arg| match arg {
-            NestedMeta::Meta(Meta::Path(p)) => {
-                match &*p.get_ident().map(ToString::to_string).unwrap_or_default() {
-                    "opaque" => {
-                        acc.opaque = true;
-                        Ok(acc)
-                    }
-                    "clone" if has_only_lifetime_params => {
+            Meta::Path(p) => {
+                if p.is_ident("opaque") {
+                    acc.opaque = true;
+                    Ok(acc)
+                } else if p.is_ident("clone") {
+                    if has_only_lifetime_params {
                         acc.clone = true;
                         Ok(acc)
+                    } else {
+                        Err(ErrorReason::CloneOnGenericType.spanned(p))
                     }
-                    "clone" => Err(ErrorReason::CloneOnGenericType.spanned(p)),
-                    _ => Err(ErrorReason::UnknownArg.spanned(p)),
+                } else {
+                    Err(ErrorReason::UnknownArg.spanned(p))
                 }
             }
             _ => Err(ErrorReason::UnknownArg.spanned(arg)),
@@ -137,17 +141,14 @@ mod tests {
 
     #[test]
     fn unknown_arg_to_ffi_type_fails() {
-        let res = process_ffi_type(
-            vec![parse_quote! { foobar }],
-            parse_quote! { struct Foo {} },
-        );
+        let res = process_ffi_type(parse_quote! { foobar }, parse_quote! { struct Foo {} });
         assert!(let Err(Error { reason: ErrorReason::UnknownArg, .. }) = res);
     }
 
     #[test]
     fn clone_for_type_generic_over_type_fails() {
         let res = process_ffi_type(
-            vec![parse_quote! { clone }],
+            parse_quote! { clone },
             parse_quote! { struct Foo<T> { x: T } },
         );
         assert!(let Err(Error { reason: ErrorReason::CloneOnGenericType, .. }) = res);
@@ -156,7 +157,7 @@ mod tests {
     #[test]
     fn clone_for_type_generic_over_lifetime_fails() {
         let out = process_ffi_type(
-            vec![parse_quote! { opaque }, parse_quote! { clone }],
+            parse_quote! { opaque, clone },
             parse_quote! { struct Foo<'a> { s: &'a str } },
         )
         .unwrap();

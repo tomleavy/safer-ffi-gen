@@ -1,8 +1,8 @@
 use proc_macro2::{Ident, Span};
 use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input, spanned::Spanned, AttributeArgs, GenericParam, Generics, PathArguments,
-    TypePath,
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, GenericParam, Generics, Meta,
+    PathArguments, Token, TypePath,
 };
 
 mod error;
@@ -40,7 +40,7 @@ pub fn ffi_type(
     args: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let args = parse_macro_input!(args as AttributeArgs);
+    let args = parse_macro_input!(args with Punctuated::<Meta, Token![,]>::parse_terminated);
     let ty_def = parse_macro_input!(input as syn::ItemStruct);
 
     process_ffi_type(args, ty_def)

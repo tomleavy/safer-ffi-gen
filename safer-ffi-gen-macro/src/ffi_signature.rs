@@ -7,7 +7,7 @@ use quote::{quote, ToTokens};
 use std::{collections::HashMap, fmt::Display};
 use syn::{
     token::SelfType, visit_mut::VisitMut, AngleBracketedGenericArguments, FnArg, GenericArgument,
-    GenericParam, Generics, Ident, Lifetime, LifetimeDef, Pat, PatIdent, PatType, PathArguments,
+    GenericParam, Generics, Ident, Lifetime, LifetimeParam, Pat, PatIdent, PatType, PathArguments,
     PathSegment, PredicateLifetime, QSelf, Receiver, ReturnType, Signature, Type, TypePath,
     TypeReference, WhereClause, WherePredicate,
 };
@@ -17,7 +17,7 @@ pub struct FfiSignature {
     self_type: Type,
     is_async: bool,
     name: Ident,
-    lifetime_params: Vec<LifetimeDef>,
+    lifetime_params: Vec<LifetimeParam>,
     lifetime_predicates: Vec<PredicateLifetime>,
     params: Vec<(Ident, Type)>,
     return_type: ReturnType,
