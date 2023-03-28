@@ -1,6 +1,9 @@
 use proc_macro2::{Ident, Span};
 use quote::{quote, ToTokens};
-use syn::{parse_macro_input, spanned::Spanned, AttributeArgs, GenericParam, Generics, TypePath};
+use syn::{
+    parse_macro_input, spanned::Spanned, AttributeArgs, GenericParam, Generics, PathArguments,
+    TypePath,
+};
 
 mod error;
 mod ffi_module;
@@ -78,4 +81,111 @@ fn non_lifetime_parameter(generics: &Generics) -> Option<Span> {
         GenericParam::Type(p) => Some(p.span()),
         GenericParam::Lifetime(_) => None,
     })
+}
+
+fn type_path_constructor(path: &TypePath) -> TypePath {
+    let mut p = match &path.qself {
+        Some(qself) => TypePath {
+            qself: None,
+            path: syn::Path {
+                leading_colon: path.path.leading_colon,
+                segments: path
+                    .path
+                    .segments
+                    .iter()
+                    .take(qself.position)
+                    .cloned()
+                    .collect(),
+            },
+        },
+        None => path.clone(),
+    };
+
+    if let Some(segment) = p.path.segments.last_mut() {
+        segment.arguments = PathArguments::None;
+    }
+
+    p
+}
+
+fn replace_type_path_constructor(path: &mut TypePath, replacement: &TypePath) {
+    let ctor_end = match &mut path.qself {
+        Some(qself) => {
+            let end = qself.position;
+            qself.position = replacement.path.segments.len();
+            end
+        }
+        None => path.path.segments.len(),
+    };
+    let args = path.path.segments[ctor_end - 1].arguments.clone();
+    let tail = path
+        .path
+        .segments
+        .iter()
+        .skip(ctor_end)
+        .cloned()
+        .collect::<Vec<_>>();
+    path.path.leading_colon = replacement.path.leading_colon;
+    path.path.segments = replacement.path.segments.iter().cloned().collect();
+    path.path.segments.last_mut().unwrap().arguments = args;
+    path.path.segments.extend(tail);
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{replace_type_path_constructor, type_path_constructor};
+    use assert2::assert;
+    use syn::{parse_quote, TypePath};
+
+    #[test]
+    fn type_path_constructor_works_for_simple_type() {
+        let expected: TypePath = parse_quote! { Foo };
+        let actual = type_path_constructor(&parse_quote! { Foo });
+        assert!(actual == expected);
+    }
+
+    #[test]
+    fn type_path_constructor_works_for_generic_type() {
+        let expected: TypePath = parse_quote! { Foo };
+        let actual = type_path_constructor(&parse_quote! { Foo<T> });
+        assert!(actual == expected);
+    }
+
+    #[test]
+    fn type_path_constructor_works_for_associated_type() {
+        let expected: TypePath = parse_quote! { bar::Bar };
+        let actual = type_path_constructor(&parse_quote! { <Foo as bar::Bar>::Output });
+        assert!(actual == expected);
+    }
+
+    #[test]
+    fn type_path_constructor_preserves_module() {
+        let expected: TypePath = parse_quote! { foo::Foo };
+        let actual = type_path_constructor(&parse_quote! { foo::Foo });
+        assert!(actual == expected);
+    }
+
+    #[test]
+    fn replacing_type_path_constructor_works() {
+        let mut ty: TypePath = parse_quote! { Foo };
+        replace_type_path_constructor(&mut ty, &parse_quote! { Bar });
+        let expected = parse_quote! { Bar };
+        assert!(ty == expected);
+    }
+
+    #[test]
+    fn replacing_type_path_constructor_works_for_generic_type() {
+        let mut ty: TypePath = parse_quote! { Foo<T> };
+        replace_type_path_constructor(&mut ty, &parse_quote! { Bar });
+        let expected = parse_quote! { Bar<T> };
+        assert!(ty == expected);
+    }
+
+    #[test]
+    fn replacing_type_path_constructor_works_for_associated_type() {
+        let mut ty: TypePath = parse_quote! { <Foo as bar::Bar>::Output };
+        replace_type_path_constructor(&mut ty, &parse_quote! { baz::Baz });
+        let expected = parse_quote! { <Foo as baz::Baz>::Output };
+        assert!(ty == expected);
+    }
 }
