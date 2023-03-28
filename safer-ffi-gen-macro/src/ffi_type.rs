@@ -174,9 +174,8 @@ fn export_drop(ty: &Ident, type_visibility: &Visibility, generics: &Generics) ->
     quote! {
         #[::safer_ffi_gen::safer_ffi::ffi_export]
         #type_visibility fn #drop_ident #impl_generics(
-            x: <#ty #type_generics as ::safer_ffi_gen::FfiType>::Safe,
+            _x: <#ty #type_generics as ::safer_ffi_gen::FfiType>::Safe,
         ) #where_clause {
-            ::core::mem::drop(x);
         }
     }
 }
