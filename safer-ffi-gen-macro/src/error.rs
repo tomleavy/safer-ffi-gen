@@ -41,8 +41,6 @@ pub enum ErrorReason {
 specified with `safer_ffi_gen::specialize` instead"
     )]
     CloneOnGenericType,
-    #[error("`opaque` is required as an argument; only opaque types are supported")]
-    OpaqueRequired,
     #[error("Trait implementation blocks are not supported")]
     TraitImplBlock,
     #[error("Implementation block must be for a type path (e.g. `some_module::some_type`")]
@@ -53,6 +51,10 @@ specified with `safer_ffi_gen::specialize` instead"
     GenericFunction,
     #[error("Unsupported parameter pattern")]
     UnsupportedParamPattern,
+    #[error("Incompatible type representations")]
+    IncompatibleRepr,
+    #[error("Missing type representation")]
+    MissingRepr,
 }
 
 impl ErrorReason {

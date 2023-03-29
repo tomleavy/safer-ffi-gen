@@ -8,9 +8,8 @@ use quote::{quote, ToTokens};
 use std::{collections::HashSet, mem::take};
 use syn::{
     parse::{Parse, ParseStream},
-    Attribute, GenericArgument, GenericParam, Generics, Ident, ImplItem, ImplItemConst,
-    ImplItemMacro, ImplItemMethod, ImplItemType, ItemImpl, PathArguments, Signature, Type,
-    TypePath,
+    Attribute, GenericArgument, GenericParam, Generics, Ident, ImplItem, ImplItemConst, ImplItemFn,
+    ImplItemMacro, ImplItemType, ItemImpl, PathArguments, Signature, Type, TypePath,
 };
 
 const EXPORT_MARKER: &str = "safer_ffi_gen";
@@ -37,9 +36,9 @@ impl FfiModule {
             .items
             .into_iter()
             .filter_map(|item| match item {
-                ImplItem::Method(method) => exported(&method.attrs)
+                ImplItem::Fn(f) => exported(&f.attrs)
                     .is_some()
-                    .then(|| FfiSignature::parse((*impl_block.self_ty).clone(), method.sig)),
+                    .then(|| FfiSignature::parse((*impl_block.self_ty).clone(), f.sig)),
                 ImplItem::Const(ImplItemConst { attrs, .. })
                 | ImplItem::Type(ImplItemType { attrs, .. })
                 | ImplItem::Macro(ImplItemMacro { attrs, .. }) => exported(&attrs)
@@ -196,7 +195,7 @@ impl Parse for FfiModule {
 
 fn exported(attrs: &[Attribute]) -> Option<&Ident> {
     attrs.iter().find_map(|attr| {
-        attr.path
+        attr.path()
             .get_ident()
             .filter(|&ident| ident == EXPORT_MARKER)
     })
@@ -252,13 +251,7 @@ fn export_module_name(type_path: &TypePath) -> Ident {
 fn type_must_be_exported(ty: &TypePath) -> bool {
     // More types will need to be added here eventually (in theory,
     // most types in the Rust prelude)
-    !matches!(
-        &*ty.path
-            .get_ident()
-            .map(ToString::to_string)
-            .unwrap_or_default(),
-        "i32"
-    )
+    !ty.path.is_ident("i32")
 }
 
 fn type_alias_target(mut ty: TypePath) -> TypePath {
@@ -300,12 +293,16 @@ impl Parse for FfiModuleInput {
             .flat_map(|item| match item {
                 ImplItem::Const(ImplItemConst { attrs, .. })
                 | ImplItem::Macro(ImplItemMacro { attrs, .. })
-                | ImplItem::Method(ImplItemMethod { attrs, .. })
+                | ImplItem::Fn(ImplItemFn { attrs, .. })
                 | ImplItem::Type(ImplItemType { attrs, .. }) => Some(attrs),
                 _ => None,
             })
             .for_each(|attrs| {
-                attrs.retain(|attr| attr.path.get_ident().map_or(true, |id| id != EXPORT_MARKER))
+                attrs.retain(|attr| {
+                    attr.path()
+                        .get_ident()
+                        .map_or(true, |id| id != EXPORT_MARKER)
+                })
             });
 
         Ok(Self { impl_block })
