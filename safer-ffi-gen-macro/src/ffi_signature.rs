@@ -195,7 +195,7 @@ impl ToTokens for FfiSignature {
 
         let call = if self.is_async {
             quote! {
-                ::safer_ffi_gen::BLOCKING_ASYNC_RUNTIME.block_on(#call)
+                ::safer_ffi_gen::block_on(#call)
             }
         } else {
             call
