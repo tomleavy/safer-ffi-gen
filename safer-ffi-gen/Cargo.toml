@@ -1,14 +1,18 @@
 [package]
 name = "safer-ffi-gen"
 version = "0.1.0-rc.1"
+authors = ["Tom Leavy", "Stephane Raux"]
+description = "FFI wrapper generator based on safer-ffi"
 edition = "2021"
+license = "MIT"
+
 
 [features]
 default = []
 tokio = ["dep:tokio", "dep:once_cell"]
 
 [dependencies]
-safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/"}
+safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/", version = "0.1.0-rc.1"}
 safer-ffi = { version = "0.0.10", features = ["proc_macros", "out-refs"] }
 tokio = {version = "1", features = ["rt-multi-thread"], optional = true}
 once_cell = { version = "1.9", optional = true }
