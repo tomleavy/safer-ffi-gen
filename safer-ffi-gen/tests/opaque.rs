@@ -40,3 +40,21 @@ fn by_ref_mut_method_works() {
     foo_inc(&mut x);
     assert_eq!(foo_get(&x), 34);
 }
+
+#[test]
+fn slice_access_works() {
+    let foos = [Foo::new(33), Foo::new(34)];
+    assert_eq!(foo_get(foo_array_get((&foos[..]).into(), 0)), 33);
+    assert_eq!(foo_get(foo_array_get((&foos[..]).into(), 1)), 34);
+}
+
+#[test]
+fn mutable_slice_access_works() {
+    let mut foos = [Foo::new(33), Foo::new(34)];
+    assert_eq!(foo_get(foo_array_get_mut((&mut foos[..]).into(), 0)), 33);
+    assert_eq!(foo_get(foo_array_get_mut((&mut foos[..]).into(), 1)), 34);
+    foo_inc(foo_array_get_mut((&mut foos[..]).into(), 0));
+    foo_inc(foo_array_get_mut((&mut foos[..]).into(), 1));
+    assert_eq!(foo_get(foo_array_get_mut((&mut foos[..]).into(), 0)), 34);
+    assert_eq!(foo_get(foo_array_get_mut((&mut foos[..]).into(), 1)), 35);
+}
