@@ -13,7 +13,11 @@ jobs:
       run: cargo fmt --all -- --check
     - name: Clippy
       run: cargo clippy --all-targets --all-features --workspace -- -D warnings
+    - name: Clippy no_std
+      run: cargo clippy --all-targets --no-default-features --workspace -- -D warnings
     - name: Build Example
       run: cargo build --examples --features=tokio,tokio/time
     - name: Test
       run: cargo test --all-features --all-targets
+    - name: Test no_std
+      run: cargo test --no-default-features --all-targets

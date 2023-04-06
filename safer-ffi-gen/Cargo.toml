@@ -8,17 +8,15 @@ license = "MIT"
 
 
 [features]
-default = []
-tokio = ["dep:tokio", "dep:once_cell"]
+default = ["std"]
+std = ["once_cell?/std", "safer-ffi/std"]
+tokio = ["dep:tokio", "dep:once_cell", "std"]
 
 [dependencies]
 safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/", version = "0.1.0-rc.1"}
-safer-ffi = { version = "0.0.10", features = ["proc_macros", "out-refs"] }
+safer-ffi = { version = "0.0.10", default-features = false, features = ["alloc", "proc_macros", "out-refs"] }
 tokio = {version = "1", features = ["rt-multi-thread"], optional = true}
-once_cell = { version = "1.9", optional = true }
-
-[dev-dependencies]
-trybuild = "1"
+once_cell = { version = "1.9", default-features = false, features = ["alloc"], optional = true }
 
 [[example]]
 name = "basic_usage"
