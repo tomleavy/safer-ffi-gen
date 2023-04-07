@@ -3,8 +3,8 @@ use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{
-    punctuated::Punctuated, spanned::Spanned, Attribute, Generics, Ident, ItemStruct, Meta, Token,
-    Visibility,
+    punctuated::Punctuated, spanned::Spanned, Attribute, Generics, Ident, ItemStruct, Lifetime,
+    LifetimeParam, Meta, Token, Visibility,
 };
 
 pub fn process_ffi_type(
@@ -65,6 +65,7 @@ pub struct FfiTypeOutput {
 impl ToTokens for FfiTypeOutput {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let has_only_lifetime_params = has_only_lifetime_parameters(&self.type_def.generics);
+
         let drop_fn = has_only_lifetime_params.then(|| {
             export_drop(
                 &self.type_def.ident,
@@ -72,6 +73,7 @@ impl ToTokens for FfiTypeOutput {
                 &self.type_def.generics,
             )
         });
+
         let clone_fn = self.clone.then(|| {
             export_clone(
                 &self.type_def.ident,
@@ -80,6 +82,15 @@ impl ToTokens for FfiTypeOutput {
                 self.repr,
             )
         });
+
+        let slice_access = (has_only_lifetime_params && self.repr == FfiRepr::Opaque).then(|| {
+            export_slice_access(
+                &self.type_def.ident,
+                &self.type_def.vis,
+                &self.type_def.generics,
+            )
+        });
+
         let type_def = &self.type_def;
 
         let ty_repr = match self.repr {
@@ -100,6 +111,8 @@ impl ToTokens for FfiTypeOutput {
             #drop_fn
 
             #clone_fn
+
+            #slice_access
         };
         out.to_tokens(tokens);
     }
@@ -180,6 +193,41 @@ fn export_drop(ty: &Ident, type_visibility: &Visibility, generics: &Generics) ->
     }
 }
 
+fn export_slice_access(
+    ty: &Ident,
+    type_visibility: &Visibility,
+    generics: &Generics,
+) -> TokenStream {
+    let prefix = fn_prefix(ty);
+    let get_ident = Ident::new(&format!("{prefix}_array_get"), Span::call_site());
+    let get_mut_ident = Ident::new(&format!("{prefix}_array_get_mut"), Span::call_site());
+    let (_, type_generics, _) = generics.split_for_impl();
+    let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
+    let mut generics = generics.clone();
+    generics
+        .params
+        .push(LifetimeParam::new(lifetime.clone()).into());
+    let (impl_generics, _, where_clause) = generics.split_for_impl();
+
+    quote! {
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #get_ident #impl_generics(
+            items: ::safer_ffi_gen::safer_ffi::slice::slice_ref<#lifetime, #ty #type_generics>,
+            index: usize,
+        ) -> & #lifetime #ty #type_generics #where_clause {
+            &items.as_slice()[index]
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #get_mut_ident #impl_generics(
+            items: ::safer_ffi_gen::safer_ffi::slice::slice_mut<#lifetime, #ty #type_generics>,
+            index: usize,
+        ) -> & #lifetime mut #ty #type_generics #where_clause {
+            &mut items.as_slice()[index]
+        }
+    }
+}
+
 fn fn_prefix(ty: &Ident) -> String {
     ty.to_string().to_snake_case()
 }
@@ -214,7 +262,7 @@ enum TypeRepr {
     Transparent,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FfiRepr {
     Opaque,
     C,
