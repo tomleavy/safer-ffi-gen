@@ -8,5 +8,5 @@ where
 
 #[safer_ffi::ffi_export]
 pub fn last_error() -> safer_ffi::String {
-    String::from("Error message is not recorded in no_std").into()
+    String::new().into()
 }
