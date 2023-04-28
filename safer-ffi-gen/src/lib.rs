@@ -155,6 +155,21 @@ impl<'a, T: ReprC> FfiType for &'a mut T {
     }
 }
 
+impl<T: FfiType, U: FfiType> FfiType for (T, U) {
+    type Safe = safer_ffi::Tuple2<T::Safe, U::Safe>;
+
+    fn into_safe(self) -> Self::Safe {
+        safer_ffi::Tuple2 {
+            _0: self.0.into_safe(),
+            _1: self.1.into_safe(),
+        }
+    }
+
+    fn from_safe(x: Self::Safe) -> Self {
+        (T::from_safe(x._0), U::from_safe(x._1))
+    }
+}
+
 thread_local! {
     static LAST_ERROR: RefCell<Option<Box<dyn std::error::Error>>> = RefCell::new(None);
 }
