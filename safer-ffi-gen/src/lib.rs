@@ -170,6 +170,18 @@ impl<T: FfiType, U: FfiType> FfiType for (T, U) {
     }
 }
 
+impl<const N: usize, T: ReprC> FfiType for [T; N] {
+    type Safe = Self;
+
+    fn into_safe(self) -> Self::Safe {
+        self
+    }
+
+    fn from_safe(x: Self::Safe) -> Self {
+        x
+    }
+}
+
 thread_local! {
     static LAST_ERROR: RefCell<Option<Box<dyn std::error::Error>>> = RefCell::new(None);
 }
