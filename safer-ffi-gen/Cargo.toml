@@ -1,10 +1,11 @@
 [package]
 name = "safer-ffi-gen"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 authors = ["Tom Leavy", "Stephane Raux"]
 description = "FFI wrapper generator based on safer-ffi"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/tomleavy/safer-ffi-gen"
 
 
 [features]
