@@ -145,7 +145,7 @@ impl FfiSignature {
             *arrow,
             Box::new(Type::Path(TypePath {
                 qself: None,
-                path: string_to_path(true, "std::ffi::c_int"),
+                path: string_to_path(true, "core::ffi::c_int"),
             })),
         );
     }
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn extracting_ok_type_from_qualified_result_works() {
         let expected_ok_type: Type = parse_quote! { Success };
-        let result_type: Type = parse_quote! { ::std::result::Result<#expected_ok_type, Failure> };
+        let result_type: Type = parse_quote! { ::core::result::Result<#expected_ok_type, Failure> };
         let ok_type = result_ok_type(&result_type);
         assert!(ok_type == Some(&expected_ok_type));
     }
@@ -568,7 +568,7 @@ mod tests {
         let expected_signature: Signature = parse_quote! {
             fn bar(
                 #output_param: ::safer_ffi_gen::safer_ffi::prelude::Out<'_, <Bar as ::safer_ffi_gen::FfiType>::Safe>
-            ) -> ::std::ffi::c_int
+            ) -> ::core::ffi::c_int
         };
 
         let actual_signature = Signature::from(signature);
@@ -584,7 +584,7 @@ mod tests {
         .unwrap();
 
         signature.make_result_output_parameter();
-        let expected_signature: Signature = parse_quote! { fn bar() -> ::std::ffi::c_int };
+        let expected_signature: Signature = parse_quote! { fn bar() -> ::core::ffi::c_int };
         let actual_signature = Signature::from(signature);
         assert!(actual_signature == expected_signature);
     }

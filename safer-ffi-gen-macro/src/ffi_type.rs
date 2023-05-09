@@ -162,10 +162,10 @@ fn export_clone(
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let return_value = match repr {
         FfiRepr::Opaque => quote! {
-            ::safer_ffi_gen::safer_ffi::boxed::Box::new(::std::clone::Clone::clone(x))
+            ::safer_ffi_gen::safer_ffi::boxed::Box::new(::core::clone::Clone::clone(x))
         },
         FfiRepr::C | FfiRepr::Transparent => quote! {
-            ::std::clone::Clone::clone(x)
+            ::core::clone::Clone::clone(x)
         },
     };
 

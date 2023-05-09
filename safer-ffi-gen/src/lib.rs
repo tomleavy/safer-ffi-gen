@@ -1,11 +1,21 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use alloc::{boxed::Box, string::String, vec::Vec};
 use safer_ffi::layout::ReprC;
-use std::cell::RefCell;
 
 pub use safer_ffi;
 pub use safer_ffi_gen_macro::*;
 
+#[cfg_attr(feature = "std", path = "with_std/error.rs")]
+#[cfg_attr(not(feature = "std"), path = "without_std/error.rs")]
+mod error;
+
 #[cfg(feature = "tokio")]
 mod async_util;
+
+pub use error::{last_error, set_last_error};
 
 #[cfg(feature = "tokio")]
 pub use async_util::*;
@@ -180,27 +190,4 @@ impl<const N: usize, T: ReprC> FfiType for [T; N] {
     fn from_safe(x: Self::Safe) -> Self {
         x
     }
-}
-
-thread_local! {
-    static LAST_ERROR: RefCell<Option<Box<dyn std::error::Error>>> = RefCell::new(None);
-}
-
-pub fn set_last_error<E>(e: E)
-where
-    E: Into<Box<dyn std::error::Error>>,
-{
-    LAST_ERROR.with(|last_error| *last_error.borrow_mut() = Some(e.into()));
-}
-
-#[safer_ffi::ffi_export]
-pub fn last_error() -> safer_ffi::String {
-    LAST_ERROR
-        .with(|e| {
-            e.borrow()
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default()
-        })
-        .into()
 }
