@@ -12,13 +12,10 @@ pub use safer_ffi_gen_macro::*;
 #[cfg_attr(not(feature = "std"), path = "without_std/error.rs")]
 mod error;
 
-#[cfg(feature = "tokio")]
 mod async_util;
 
-pub use error::{last_error, set_last_error};
-
-#[cfg(feature = "tokio")]
 pub use async_util::*;
+pub use error::{last_error, set_last_error};
 
 pub trait FfiType {
     type Safe;

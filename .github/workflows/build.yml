@@ -16,7 +16,7 @@ jobs:
     - name: Clippy no_std
       run: cargo clippy --all-targets --no-default-features --workspace -- -D warnings
     - name: Build Example
-      run: cargo build --examples --features=tokio,tokio/time
+      run: cargo build --examples
     - name: Test
       run: cargo test --all-features --all-targets
     - name: Test no_std
