@@ -75,6 +75,8 @@ impl TestStruct {
 }
 
 pub fn main() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    safer_ffi_gen::set_block_on_executor(move |f| runtime.block_on(f));
     let test_struct = test_struct_new(vec![0, 1].into(), "test".to_string().into());
 
     assert_eq!(test_struct_do_something_that_fails(&test_struct), -1);

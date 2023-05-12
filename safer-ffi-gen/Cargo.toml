@@ -10,15 +10,12 @@ repository = "https://github.com/tomleavy/safer-ffi-gen"
 
 [features]
 default = ["std"]
-std = ["once_cell?/std", "safer-ffi/std"]
-tokio = ["dep:tokio", "dep:once_cell", "std"]
+std = ["once_cell/std", "safer-ffi/std"]
 
 [dependencies]
 safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/", version = "0.1.0-rc.1"}
 safer-ffi = { version = "0.0.10", default-features = false, features = ["alloc", "proc_macros", "out-refs"] }
-tokio = {version = "1", features = ["rt-multi-thread"], optional = true}
-once_cell = { version = "1.9", default-features = false, features = ["alloc"], optional = true }
+once_cell = { version = "1.9", default-features = false, features = ["alloc", "critical-section"] }
 
-[[example]]
-name = "basic_usage"
-required-features = ["tokio", "tokio/time"]
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
