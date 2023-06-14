@@ -6,14 +6,15 @@ use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use std::{collections::HashMap, fmt::Display};
 use syn::{
-    token::SelfType, visit_mut::VisitMut, AngleBracketedGenericArguments, FnArg, GenericArgument,
-    GenericParam, Generics, Ident, Lifetime, LifetimeParam, Pat, PatIdent, PatType, PathArguments,
-    PathSegment, PredicateLifetime, QSelf, Receiver, ReturnType, Signature, Type, TypePath,
-    TypeReference, WhereClause, WherePredicate,
+    token::SelfType, visit_mut::VisitMut, AngleBracketedGenericArguments, Attribute, FnArg,
+    GenericArgument, GenericParam, Generics, Ident, ImplItemFn, Lifetime, LifetimeParam, Pat,
+    PatIdent, PatType, PathArguments, PathSegment, PredicateLifetime, QSelf, Receiver, ReturnType,
+    Signature, Type, TypePath, TypeReference, WhereClause, WherePredicate,
 };
 
 #[derive(Clone, Debug)]
 pub struct FfiSignature {
+    attrs: Vec<Attribute>,
     self_type: Type,
     is_async: bool,
     name: Ident,
@@ -25,8 +26,9 @@ pub struct FfiSignature {
 }
 
 impl FfiSignature {
-    pub fn parse(self_type: Type, signature: Signature) -> Result<FfiSignature, Error> {
-        let lifetime_params = signature
+    pub fn parse(self_type: Type, function: ImplItemFn) -> Result<FfiSignature, Error> {
+        let lifetime_params = function
+            .sig
             .generics
             .params
             .iter()
@@ -37,11 +39,12 @@ impl FfiSignature {
             .collect::<Result<Vec<_>, _>>()?;
 
         let lifetime_predicates =
-            filter_lifetime_predicates(signature.generics.where_clause.as_ref())
+            filter_lifetime_predicates(function.sig.generics.where_clause.as_ref())
                 .cloned()
                 .collect();
 
-        let params = signature
+        let params = function
+            .sig
             .inputs
             .into_iter()
             .map(|input| match input {
@@ -70,13 +73,14 @@ impl FfiSignature {
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut sig = FfiSignature {
+            attrs: function.attrs,
             self_type: self_type.clone(),
-            is_async: signature.asyncness.is_some(),
-            name: signature.ident,
+            is_async: function.sig.asyncness.is_some(),
+            name: function.sig.ident,
             lifetime_params,
             lifetime_predicates,
             params,
-            return_type: signature.output,
+            return_type: function.sig.output,
             export_prefix: None,
         };
 
@@ -232,7 +236,10 @@ impl ToTokens for FfiSignature {
             }),
         };
 
+        let attrs = &self.attrs;
+
         quote! {
+            #(#attrs)*
             #[::safer_ffi_gen::safer_ffi::ffi_export]
             pub #signature {
                 #(#arg_conversions)*
@@ -546,7 +553,7 @@ mod tests {
     #[test]
     fn prefixing_function_name_works() {
         let mut signature =
-            FfiSignature::parse(parse_quote! { FooBar }, parse_quote! { fn baz() }).unwrap();
+            FfiSignature::parse(parse_quote! { FooBar }, parse_quote! { fn baz() {} }).unwrap();
 
         signature.prefix_with_type(&parse_quote! { ::test::FooBar });
         let expected_signature: Signature = parse_quote! { fn foo_bar_baz() };
@@ -558,7 +565,7 @@ mod tests {
     fn making_result_an_output_parameter_works() {
         let mut signature = FfiSignature::parse(
             parse_quote! { Foo },
-            parse_quote! { fn bar() -> Result<Bar, Error> },
+            parse_quote! { fn bar() -> Result<Bar, Error> {} },
         )
         .unwrap();
 
@@ -579,7 +586,7 @@ mod tests {
     fn unit_ok_type_does_not_cause_an_output_parameter() {
         let mut signature = FfiSignature::parse(
             parse_quote! { Foo },
-            parse_quote! { fn bar() -> Result<(), Error> },
+            parse_quote! { fn bar() -> Result<(), Error> {} },
         )
         .unwrap();
 
@@ -593,7 +600,7 @@ mod tests {
     fn extracting_all_types_works() {
         let signature = FfiSignature::parse(
             parse_quote! { Foo },
-            parse_quote! { fn bar(x: Bar) -> Result<i32, ()> },
+            parse_quote! { fn bar(x: Bar) -> Result<i32, ()> {} },
         )
         .unwrap();
 

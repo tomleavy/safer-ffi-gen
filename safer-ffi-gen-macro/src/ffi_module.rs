@@ -34,7 +34,7 @@ impl FfiModule {
             .items
             .into_iter()
             .filter_map(|item| match item {
-                ImplItem::Fn(f) => Some(FfiSignature::parse((*impl_block.self_ty).clone(), f.sig)),
+                ImplItem::Fn(f) => Some(FfiSignature::parse((*impl_block.self_ty).clone(), f)),
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;
