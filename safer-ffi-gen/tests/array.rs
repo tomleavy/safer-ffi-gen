@@ -7,17 +7,14 @@ pub struct Foo {
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen]
     pub fn new_many(i: i32) -> [Foo; 2] {
         [Self { i }, Self { i }]
     }
 
-    #[safer_ffi_gen]
     fn get(&self) -> i32 {
         self.i
     }
 
-    #[safer_ffi_gen]
     fn take_many(_foos: [Foo; 2]) {}
 }
 

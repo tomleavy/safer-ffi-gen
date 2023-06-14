@@ -7,16 +7,12 @@ pub struct Foo {
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen]
     pub fn take_self_by_value(_x: Self) {}
 
-    #[safer_ffi_gen]
     pub fn take_self_by_ref(_x: &Self) {}
 
-    #[safer_ffi_gen]
     pub fn take_wrapped_self(_x: Vec<&Self>) {}
 
-    #[safer_ffi_gen]
     pub fn return_self() -> Self {
         Self { i: 33 }
     }

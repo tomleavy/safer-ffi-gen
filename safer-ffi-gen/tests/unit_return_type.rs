@@ -4,7 +4,6 @@ pub struct Foo;
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen]
     pub fn foo() {}
 }
 

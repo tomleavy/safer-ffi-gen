@@ -7,12 +7,10 @@ pub struct Foo<T> {
 
 #[safer_ffi_gen]
 impl<T> Foo<T> {
-    #[safer_ffi_gen]
     pub fn new(x: T) -> Self {
         Self { x }
     }
 
-    #[safer_ffi_gen]
     pub fn get(&self) -> &T {
         &self.x
     }

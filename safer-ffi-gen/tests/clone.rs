@@ -8,17 +8,14 @@ pub struct Foo {
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen]
     pub fn new(i: i32) -> Foo {
         Self { i }
     }
 
-    #[safer_ffi_gen]
     pub fn get(&self) -> i32 {
         self.i
     }
 
-    #[safer_ffi_gen]
     pub fn inc(&mut self) {
         self.i += 1;
     }
