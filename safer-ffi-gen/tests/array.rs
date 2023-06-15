@@ -11,11 +11,11 @@ impl Foo {
         [Self { i }, Self { i }]
     }
 
-    fn get(&self) -> i32 {
+    pub fn get(&self) -> i32 {
         self.i
     }
 
-    fn take_many(_foos: [Foo; 2]) {}
+    pub fn take_many(_foos: [Foo; 2]) {}
 }
 
 #[test]

@@ -9,7 +9,7 @@ use std::{collections::HashSet, mem::take};
 use syn::{
     parse::{Parse, ParseStream},
     GenericArgument, GenericParam, Generics, Ident, ImplItem, ItemImpl, PathArguments, Signature,
-    Type, TypePath,
+    Type, TypePath, Visibility,
 };
 
 #[derive(Debug)]
@@ -34,7 +34,8 @@ impl FfiModule {
             .items
             .into_iter()
             .filter_map(|item| match item {
-                ImplItem::Fn(f) => Some(FfiSignature::parse((*impl_block.self_ty).clone(), f)),
+                ImplItem::Fn(f) => matches!(f.vis, Visibility::Public(_))
+                    .then(|| FfiSignature::parse((*impl_block.self_ty).clone(), f)),
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -119,7 +120,7 @@ impl FfiModule {
         let mini_impl_block = quote! {
             impl #impl_generics #type_path #where_clause {
                 #(
-                    #functions {}
+                    pub #functions {}
                 )*
             }
         };
@@ -264,10 +265,10 @@ fn type_alias(i: usize) -> Ident {
 
 #[cfg(test)]
 mod tests {
-    use crate::ffi_module::extract_named_types;
+    use crate::ffi_module::{extract_named_types, FfiModule};
     use assert2::assert;
     use std::{collections::HashSet, hash::Hash};
-    use syn::{parse_quote, TypePath};
+    use syn::{parse_quote, Signature, TypePath};
 
     fn make_set<I>(items: I) -> HashSet<I::Item>
     where
@@ -289,5 +290,20 @@ mod tests {
         let actual = extract_named_types(&parse_quote! { Vec<i32> });
         let expected: [TypePath; 2] = [parse_quote! { Vec }, parse_quote! { i32 }];
         assert!(make_set(actual) == make_set(expected));
+    }
+
+    #[test]
+    fn only_pub_functions_are_considered() {
+        let module = FfiModule::new(parse_quote! {
+            impl Foo {
+                pub fn foo() {}
+                pub(crate) fn bar() {}
+                fn baz() {}
+            }
+        })
+        .unwrap();
+
+        assert_eq!(module.functions.len(), 1);
+        assert_eq!(Signature::from(module.functions[0].clone()).ident, "foo");
     }
 }
