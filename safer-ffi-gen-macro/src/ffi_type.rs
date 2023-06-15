@@ -95,7 +95,7 @@ impl ToTokens for FfiTypeOutput {
 
         let ty_repr = match self.repr {
             FfiRepr::C => quote! { #[repr(C)] },
-            FfiRepr::Opaque => quote! { #[ReprC::opaque] },
+            FfiRepr::Opaque => quote! { #[repr(opaque)] },
             FfiRepr::Transparent => quote! { #[repr(transparent)] },
         };
 
@@ -137,10 +137,10 @@ fn impl_ffi_type(ty: &Ident, generics: &Generics, repr: FfiRepr) -> TokenStream 
         },
         FfiRepr::Opaque => quote! {
             impl #impl_generics ::safer_ffi_gen::FfiType for #ty #type_generics #where_clause {
-                type Safe = ::safer_ffi_gen::safer_ffi::boxed::Box<#ty #type_generics>;
+                type Safe = ::safer_ffi_gen::safer_ffi::boxed::Box_<#ty #type_generics>;
 
                 fn into_safe(self) -> Self::Safe {
-                    ::safer_ffi_gen::safer_ffi::boxed::Box::new(self)
+                    ::safer_ffi_gen::safer_ffi::boxed::Box_::new(self)
                 }
 
                 fn from_safe(x: Self::Safe) -> Self {
@@ -162,7 +162,7 @@ fn export_clone(
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let return_value = match repr {
         FfiRepr::Opaque => quote! {
-            ::safer_ffi_gen::safer_ffi::boxed::Box::new(::core::clone::Clone::clone(x))
+            ::safer_ffi_gen::safer_ffi::boxed::Box_::new(::core::clone::Clone::clone(x))
         },
         FfiRepr::C | FfiRepr::Transparent => quote! {
             ::core::clone::Clone::clone(x)
