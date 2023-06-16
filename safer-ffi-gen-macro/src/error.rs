@@ -45,8 +45,6 @@ specified with `safer_ffi_gen::specialize` instead"
     TraitImplBlock,
     #[error("Implementation block must be for a type path (e.g. `some_module::some_type`")]
     ImplBlockMustBeForTypePath,
-    #[error("Only functions can be exported")]
-    OnylFunctionsCanBeExported,
     #[error("Exported functions can only be generic over lifetimes")]
     GenericFunction,
     #[error("Unsupported parameter pattern")]

@@ -7,13 +7,11 @@ pub struct Foo {
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen]
     pub fn new_pair(i: i32, j: i32) -> (Foo, Foo) {
         (Self { i }, Self { i: j })
     }
 
-    #[safer_ffi_gen]
-    fn get(&self) -> i32 {
+    pub fn get(&self) -> i32 {
         self.i
     }
 }

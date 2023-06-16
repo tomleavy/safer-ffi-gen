@@ -8,11 +8,9 @@ use quote::{quote, ToTokens};
 use std::{collections::HashSet, mem::take};
 use syn::{
     parse::{Parse, ParseStream},
-    Attribute, GenericArgument, GenericParam, Generics, Ident, ImplItem, ImplItemConst, ImplItemFn,
-    ImplItemMacro, ImplItemType, ItemImpl, PathArguments, Signature, Type, TypePath,
+    GenericArgument, GenericParam, Generics, Ident, ImplItem, ItemImpl, PathArguments, Signature,
+    Type, TypePath,
 };
-
-const EXPORT_MARKER: &str = "safer_ffi_gen";
 
 #[derive(Debug)]
 pub struct FfiModule {
@@ -36,13 +34,7 @@ impl FfiModule {
             .items
             .into_iter()
             .filter_map(|item| match item {
-                ImplItem::Fn(f) => exported(&f.attrs)
-                    .is_some()
-                    .then(|| FfiSignature::parse((*impl_block.self_ty).clone(), f.sig)),
-                ImplItem::Const(ImplItemConst { attrs, .. })
-                | ImplItem::Type(ImplItemType { attrs, .. })
-                | ImplItem::Macro(ImplItemMacro { attrs, .. }) => exported(&attrs)
-                    .map(|marker| Err(ErrorReason::OnylFunctionsCanBeExported.spanned(marker))),
+                ImplItem::Fn(f) => Some(FfiSignature::parse((*impl_block.self_ty).clone(), f)),
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -127,7 +119,6 @@ impl FfiModule {
         let mini_impl_block = quote! {
             impl #impl_generics #type_path #where_clause {
                 #(
-                    #[safer_ffi_gen]
                     #functions {}
                 )*
             }
@@ -191,14 +182,6 @@ impl Parse for FfiModule {
         let impl_block = ItemImpl::parse(input)?;
         FfiModule::new(impl_block).map_err(Into::into)
     }
-}
-
-fn exported(attrs: &[Attribute]) -> Option<&Ident> {
-    attrs.iter().find_map(|attr| {
-        attr.path()
-            .get_ident()
-            .filter(|&ident| ident == EXPORT_MARKER)
-    })
 }
 
 fn type_parameters(type_path: &TypePath) -> impl Iterator<Item = &Type> {
@@ -277,42 +260,6 @@ fn type_alias_target(mut ty: TypePath) -> TypePath {
 
 fn type_alias(i: usize) -> Ident {
     Ident::new(&format!("Type{i}"), Span::call_site())
-}
-
-#[derive(Debug)]
-pub struct FfiModuleInput {
-    impl_block: ItemImpl,
-}
-
-impl Parse for FfiModuleInput {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut impl_block = ItemImpl::parse(input)?;
-        impl_block
-            .items
-            .iter_mut()
-            .flat_map(|item| match item {
-                ImplItem::Const(ImplItemConst { attrs, .. })
-                | ImplItem::Macro(ImplItemMacro { attrs, .. })
-                | ImplItem::Fn(ImplItemFn { attrs, .. })
-                | ImplItem::Type(ImplItemType { attrs, .. }) => Some(attrs),
-                _ => None,
-            })
-            .for_each(|attrs| {
-                attrs.retain(|attr| {
-                    attr.path()
-                        .get_ident()
-                        .map_or(true, |id| id != EXPORT_MARKER)
-                })
-            });
-
-        Ok(Self { impl_block })
-    }
-}
-
-impl ToTokens for FfiModuleInput {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.impl_block.to_tokens(tokens);
-    }
 }
 
 #[cfg(test)]

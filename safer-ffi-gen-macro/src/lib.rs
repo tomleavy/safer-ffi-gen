@@ -1,5 +1,5 @@
 use proc_macro2::{Ident, Span};
-use quote::{quote, ToTokens};
+use quote::ToTokens;
 use syn::{
     parse_macro_input, punctuated::Punctuated, spanned::Spanned, GenericParam, Generics, Meta,
     PathArguments, Token, TypePath,
@@ -14,7 +14,7 @@ mod specialization;
 mod test_utils;
 
 use error::{Error, ErrorReason};
-use ffi_module::{FfiModule, FfiModuleInput};
+use ffi_module::FfiModule;
 use ffi_signature::FfiSignature;
 use ffi_type::process_ffi_type;
 use specialization::{Specialization, SpecializationDecl};
@@ -24,15 +24,10 @@ pub fn safer_ffi_gen(
     _attr: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let input = item.clone();
-    let input = parse_macro_input!(input as FfiModuleInput);
+    let mut input = item.clone();
     let output = parse_macro_input!(item as FfiModule);
-
-    quote! {
-        #input
-        #output
-    }
-    .into()
+    input.extend([proc_macro::TokenStream::from(output.to_token_stream())]);
+    input
 }
 
 #[proc_macro_attribute]

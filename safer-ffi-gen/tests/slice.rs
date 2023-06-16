@@ -4,7 +4,6 @@ struct Foo;
 
 #[safer_ffi_gen]
 impl Foo {
-    #[safer_ffi_gen]
     pub fn identity(bytes: &[u8]) -> &[u8] {
         bytes
     }
