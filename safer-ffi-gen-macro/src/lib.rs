@@ -30,6 +30,15 @@ pub fn safer_ffi_gen(
     input
 }
 
+/// Marker to ignore functions in `impl` block
+#[proc_macro_attribute]
+pub fn safer_ffi_gen_ignore(
+    _: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    item
+}
+
 #[proc_macro_attribute]
 pub fn ffi_type(
     args: proc_macro::TokenStream,

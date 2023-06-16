@@ -34,8 +34,16 @@ impl FfiModule {
             .items
             .into_iter()
             .filter_map(|item| match item {
-                ImplItem::Fn(f) => matches!(f.vis, Visibility::Public(_))
-                    .then(|| FfiSignature::parse((*impl_block.self_ty).clone(), f)),
+                ImplItem::Fn(f) => {
+                    let exported = matches!(f.vis, Visibility::Public(_))
+                        && !f.attrs.iter().any(|attr| {
+                            attr.to_token_stream()
+                                .to_string()
+                                .contains("safer_ffi_gen_ignore")
+                        });
+
+                    exported.then(|| FfiSignature::parse((*impl_block.self_ty).clone(), f))
+                }
                 _ => None,
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -299,6 +307,25 @@ mod tests {
                 pub fn foo() {}
                 pub(crate) fn bar() {}
                 fn baz() {}
+            }
+        })
+        .unwrap();
+
+        assert_eq!(module.functions.len(), 1);
+        assert_eq!(Signature::from(module.functions[0].clone()).ident, "foo");
+    }
+
+    #[test]
+    fn functions_can_be_ignored() {
+        let module = FfiModule::new(parse_quote! {
+            impl Foo {
+                pub fn foo() {}
+
+                #[safer_ffi_gen_ignore]
+                pub fn bar() {}
+
+                #[cfg_attr(feature = "ffi", safer_ffi_gen_ignore)]
+                pub fn baz() {}
             }
         })
         .unwrap();
