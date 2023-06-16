@@ -125,16 +125,17 @@ impl<T: ReprC> FfiType for Box<T> {
 
 impl<T> FfiType for Option<T>
 where
-    Option<T>: ReprC,
+    T: FfiType,
+    Option<T::Safe>: ReprC,
 {
-    type Safe = Option<T>;
+    type Safe = Option<T::Safe>;
 
     fn into_safe(self) -> Self::Safe {
-        self
+        self.map(T::into_safe)
     }
 
     fn from_safe(x: Self::Safe) -> Self {
-        x
+        x.map(T::from_safe)
     }
 }
 
