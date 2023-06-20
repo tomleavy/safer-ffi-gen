@@ -4,7 +4,7 @@ struct Foo;
 
 #[safer_ffi_gen]
 impl Foo {
-    fn append(mut v: Vec<u8>, x: u8) -> Vec<u8> {
+    pub fn append(mut v: Vec<u8>, x: u8) -> Vec<u8> {
         v.push(x);
         v
     }
