@@ -5,6 +5,7 @@ use syn::{
     PathArguments, Token, TypePath,
 };
 
+mod enum_to_error_code;
 mod error;
 mod ffi_module;
 mod ffi_signature;
@@ -13,6 +14,7 @@ mod specialization;
 #[cfg(test)]
 mod test_utils;
 
+use enum_to_error_code::impl_enum_to_error_code;
 use error::{Error, ErrorReason};
 use ffi_module::FfiModule;
 use ffi_signature::FfiSignature;
@@ -52,6 +54,20 @@ pub fn ffi_type(
         .map_err(Into::into)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+
+#[proc_macro_attribute]
+pub fn enum_to_error_code(
+    _: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let mut input = item.clone();
+    let enum_def = parse_macro_input!(item as syn::ItemEnum);
+    let generated = impl_enum_to_error_code(enum_def)
+        .map_err(Into::into)
+        .unwrap_or_else(syn::Error::into_compile_error);
+    input.extend(proc_macro::TokenStream::from(generated));
+    input
 }
 
 #[proc_macro]
