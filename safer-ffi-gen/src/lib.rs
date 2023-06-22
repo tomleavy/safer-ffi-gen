@@ -8,14 +8,23 @@ use safer_ffi::layout::ReprC;
 pub use safer_ffi;
 pub use safer_ffi_gen_macro::*;
 
-#[cfg_attr(feature = "std", path = "with_std/error.rs")]
-#[cfg_attr(not(feature = "std"), path = "without_std/error.rs")]
+mod async_util;
 mod error;
 
-mod async_util;
-
 pub use async_util::*;
-pub use error::{last_error, set_last_error};
+
+#[cfg(feature = "std")]
+pub use error::last_error;
+
+/// Private definitions used by macros. These are always considered unstable and can have breaking
+/// changes between semver-compatible releases of this crate. Do not use.
+#[doc(hidden)]
+pub mod private {
+    #[cfg(feature = "std")]
+    pub use crate::error::{set_last_error, WrapDebug, WrapError, WrapNotDebug, WrapNotError};
+
+    pub use crate::error::{WrapIntoInt, WrapNotIntoInt};
+}
 
 pub trait FfiType {
     type Safe;

@@ -224,8 +224,9 @@ impl ToTokens for FfiSignature {
                                 0
                             }
                             Err(e) => {
-                                ::safer_ffi_gen::set_last_error(e);
-                                -1
+                                let code = ::safer_ffi_gen::error_code!(e);
+                                ::safer_ffi_gen::set_last_error!(e);
+                                code
                             }
                         }
                     }
