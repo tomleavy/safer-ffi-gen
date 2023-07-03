@@ -1,6 +1,6 @@
 [package]
 name = "safer-ffi-gen"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Tom Leavy", "Stephane Raux"]
 description = "FFI wrapper generator based on safer-ffi"
 edition = "2021"
@@ -13,7 +13,7 @@ default = ["std"]
 std = ["once_cell/std", "safer-ffi/std"]
 
 [dependencies]
-safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/", version = "0.1.0"}
+safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/", version = "0.2.0"}
 safer-ffi = { version = "0.1.0", default-features = false, features = ["alloc", "proc_macros"] }
 once_cell = { version = "1.9", default-features = false, features = ["alloc", "critical-section"] }
 
