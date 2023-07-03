@@ -19,3 +19,11 @@ once_cell = { version = "1.9", default-features = false, features = ["alloc", "c
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+
+[[example]]
+name = "basic_usage"
+required-features = ["std"]
+
+[[test]]
+name = "last_error"
+required-features = ["std"]

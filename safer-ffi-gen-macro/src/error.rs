@@ -53,6 +53,8 @@ specified with `safer_ffi_gen::specialize` instead"
     IncompatibleRepr,
     #[error("Missing type representation")]
     MissingRepr,
+    #[error("Too many variants")]
+    TooManyVariants,
 }
 
 impl ErrorReason {
