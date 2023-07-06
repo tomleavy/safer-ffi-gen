@@ -3,14 +3,26 @@ use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{
-    punctuated::Punctuated, spanned::Spanned, Attribute, Generics, Ident, ItemStruct, Lifetime,
-    LifetimeParam, Meta, Token, Visibility,
+    punctuated::Punctuated, spanned::Spanned, Attribute, Generics, Ident, Item, ItemStruct,
+    Lifetime, LifetimeParam, Meta, Token, Visibility,
 };
 
 pub fn process_ffi_type(
     args: Punctuated<Meta, Token![,]>,
+    def: Item,
+) -> Result<TokenStream, Error> {
+    match def {
+        Item::Struct(type_def) => {
+            process_ffi_struct(args, type_def).map(ToTokens::into_token_stream)
+        }
+        _ => Err(ErrorReason::UnsupportedItemType.spanned(def)),
+    }
+}
+
+fn process_ffi_struct(
+    args: Punctuated<Meta, Token![,]>,
     type_def: ItemStruct,
-) -> Result<FfiTypeOutput, Error> {
+) -> Result<FfiStructOutput, Error> {
     let has_only_lifetime_params = has_only_lifetime_parameters(&type_def.generics);
 
     let args = args
@@ -42,7 +54,7 @@ pub fn process_ffi_type(
         (None, None) => Err(ErrorReason::MissingRepr.with_span(Span::call_site())),
     }?;
 
-    Ok(FfiTypeOutput {
+    Ok(FfiStructOutput {
         repr,
         type_def,
         clone: args.clone.is_some(),
@@ -56,13 +68,13 @@ struct FfiTypeArgs {
 }
 
 #[derive(Debug)]
-pub struct FfiTypeOutput {
+struct FfiStructOutput {
     repr: FfiRepr,
     type_def: ItemStruct,
     clone: bool,
 }
 
-impl ToTokens for FfiTypeOutput {
+impl ToTokens for FfiStructOutput {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let has_only_lifetime_params = has_only_lifetime_parameters(&self.type_def.generics);
 
@@ -303,21 +315,21 @@ impl<T> WithSpan<T> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ffi_type::{type_repr, TypeRepr},
-        process_ffi_type, Error, ErrorReason,
+        ffi_type::{process_ffi_struct, type_repr, TypeRepr},
+        Error, ErrorReason,
     };
     use assert2::assert;
     use syn::{parse_quote, ItemStruct};
 
     #[test]
     fn unknown_arg_to_ffi_type_fails() {
-        let res = process_ffi_type(parse_quote! { foobar }, parse_quote! { struct Foo {} });
+        let res = process_ffi_struct(parse_quote! { foobar }, parse_quote! { struct Foo {} });
         assert!(let Err(Error { reason: ErrorReason::UnknownArg, .. }) = res);
     }
 
     #[test]
     fn clone_for_type_generic_over_type_fails() {
-        let res = process_ffi_type(
+        let res = process_ffi_struct(
             parse_quote! { clone },
             parse_quote! { struct Foo<T> { x: T } },
         );
@@ -326,7 +338,7 @@ mod tests {
 
     #[test]
     fn clone_for_type_generic_over_lifetime_fails() {
-        let out = process_ffi_type(
+        let out = process_ffi_struct(
             parse_quote! { opaque, clone },
             parse_quote! { struct Foo<'a> { s: &'a str } },
         )

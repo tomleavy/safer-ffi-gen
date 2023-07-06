@@ -47,7 +47,7 @@ pub fn ffi_type(
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let args = parse_macro_input!(args with Punctuated::<Meta, Token![,]>::parse_terminated);
-    let ty_def = parse_macro_input!(input as syn::ItemStruct);
+    let ty_def = parse_macro_input!(input as syn::Item);
 
     process_ffi_type(args, ty_def)
         .map(ToTokens::into_token_stream)
