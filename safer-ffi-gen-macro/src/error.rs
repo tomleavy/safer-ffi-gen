@@ -55,6 +55,8 @@ specified with `safer_ffi_gen::specialize` instead"
     MissingRepr,
     #[error("Too many variants")]
     TooManyVariants,
+    #[error("Unsupported item type (only structs and enums are supported)")]
+    UnsupportedItemType,
 }
 
 impl ErrorReason {

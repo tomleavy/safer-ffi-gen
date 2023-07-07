@@ -3,47 +3,46 @@ use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{
-    punctuated::Punctuated, spanned::Spanned, Attribute, Generics, Ident, ItemStruct, Lifetime,
-    LifetimeParam, Meta, Token, Visibility,
+    punctuated::Punctuated, spanned::Spanned, Attribute, Fields, Generics, Ident, Item, ItemEnum,
+    ItemStruct, Lifetime, LifetimeParam, Meta, Token, Visibility,
 };
 
 pub fn process_ffi_type(
     args: Punctuated<Meta, Token![,]>,
+    def: Item,
+) -> Result<TokenStream, Error> {
+    match def {
+        Item::Struct(type_def) => {
+            process_ffi_struct(args, type_def).map(ToTokens::into_token_stream)
+        }
+        Item::Enum(type_def) => process_ffi_enum(args, type_def).map(ToTokens::into_token_stream),
+        _ => Err(ErrorReason::UnsupportedItemType.spanned(def)),
+    }
+}
+
+fn process_ffi_struct(
+    args: Punctuated<Meta, Token![,]>,
     type_def: ItemStruct,
-) -> Result<FfiTypeOutput, Error> {
-    let has_only_lifetime_params = has_only_lifetime_parameters(&type_def.generics);
+) -> Result<FfiStructOutput, Error> {
+    let args = FfiTypeArgs::parse(&args, &type_def.generics)?;
+    let opaque = is_opaque(&args, &type_def.attrs)?;
 
-    let args = args
-        .iter()
-        .try_fold(FfiTypeArgs::default(), |mut acc, arg| match arg {
-            Meta::Path(p) => {
-                if p.is_ident("opaque") {
-                    acc.repr = Some(WithSpan::new(FfiRepr::Opaque, p.span()));
-                    Ok(acc)
-                } else if p.is_ident("clone") {
-                    if has_only_lifetime_params {
-                        acc.clone = Some(p.span());
-                        Ok(acc)
-                    } else {
-                        Err(ErrorReason::CloneOnGenericType.spanned(p))
-                    }
-                } else {
-                    Err(ErrorReason::UnknownArg.spanned(p))
-                }
-            }
-            _ => Err(ErrorReason::UnknownArg.spanned(arg)),
-        })?;
+    Ok(FfiStructOutput {
+        opaque,
+        type_def,
+        clone: args.clone.is_some(),
+    })
+}
 
-    let ty_repr = type_repr(&type_def.attrs).map(|r| r.map(FfiRepr::from));
+fn process_ffi_enum(
+    args: Punctuated<Meta, Token![,]>,
+    type_def: ItemEnum,
+) -> Result<FfiEnumOutput, Error> {
+    let args = FfiTypeArgs::parse(&args, &type_def.generics)?;
+    let opaque = is_opaque(&args, &type_def.attrs)?;
 
-    let repr = match (ty_repr, args.repr) {
-        (Some(a), Some(_)) => Err(ErrorReason::IncompatibleRepr.with_span(a.span)),
-        (Some(a), None) | (None, Some(a)) => Ok(a.item),
-        (None, None) => Err(ErrorReason::MissingRepr.with_span(Span::call_site())),
-    }?;
-
-    Ok(FfiTypeOutput {
-        repr,
+    Ok(FfiEnumOutput {
+        opaque,
         type_def,
         clone: args.clone.is_some(),
     })
@@ -51,18 +50,47 @@ pub fn process_ffi_type(
 
 #[derive(Debug, Default)]
 struct FfiTypeArgs {
-    repr: Option<WithSpan<FfiRepr>>,
+    opaque: Option<Span>,
     clone: Option<Span>,
 }
 
+impl FfiTypeArgs {
+    fn parse(args: &Punctuated<Meta, Token![,]>, generics: &Generics) -> Result<Self, Error> {
+        let has_only_lifetime_params = has_only_lifetime_parameters(generics);
+
+        let args = args
+            .iter()
+            .try_fold(FfiTypeArgs::default(), |mut acc, arg| match arg {
+                Meta::Path(p) => {
+                    if p.is_ident("opaque") {
+                        acc.opaque = Some(p.span());
+                        Ok(acc)
+                    } else if p.is_ident("clone") {
+                        if has_only_lifetime_params {
+                            acc.clone = Some(p.span());
+                            Ok(acc)
+                        } else {
+                            Err(ErrorReason::CloneOnGenericType.spanned(p))
+                        }
+                    } else {
+                        Err(ErrorReason::UnknownArg.spanned(p))
+                    }
+                }
+                _ => Err(ErrorReason::UnknownArg.spanned(arg)),
+            })?;
+
+        Ok(args)
+    }
+}
+
 #[derive(Debug)]
-pub struct FfiTypeOutput {
-    repr: FfiRepr,
+struct FfiStructOutput {
+    opaque: bool,
     type_def: ItemStruct,
     clone: bool,
 }
 
-impl ToTokens for FfiTypeOutput {
+impl ToTokens for FfiStructOutput {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let has_only_lifetime_params = has_only_lifetime_parameters(&self.type_def.generics);
 
@@ -79,11 +107,11 @@ impl ToTokens for FfiTypeOutput {
                 &self.type_def.ident,
                 &self.type_def.vis,
                 &self.type_def.generics,
-                self.repr,
+                self.opaque,
             )
         });
 
-        let slice_access = (has_only_lifetime_params && self.repr == FfiRepr::Opaque).then(|| {
+        let slice_access = (has_only_lifetime_params && self.opaque).then(|| {
             export_slice_access(
                 &self.type_def.ident,
                 &self.type_def.vis,
@@ -92,14 +120,10 @@ impl ToTokens for FfiTypeOutput {
         });
 
         let type_def = &self.type_def;
+        let ty_repr = self.opaque.then(|| quote! { #[repr(opaque)] });
 
-        let ty_repr = match self.repr {
-            FfiRepr::C => quote! { #[repr(C)] },
-            FfiRepr::Opaque => quote! { #[repr(opaque)] },
-            FfiRepr::Transparent => quote! { #[repr(transparent)] },
-        };
-
-        let ffi_type_impl = impl_ffi_type(&self.type_def.ident, &self.type_def.generics, self.repr);
+        let ffi_type_impl =
+            impl_ffi_type(&self.type_def.ident, &self.type_def.generics, self.opaque);
 
         let out = quote! {
             #[::safer_ffi_gen::safer_ffi::derive_ReprC]
@@ -118,24 +142,88 @@ impl ToTokens for FfiTypeOutput {
     }
 }
 
-fn impl_ffi_type(ty: &Ident, generics: &Generics, repr: FfiRepr) -> TokenStream {
+#[derive(Debug)]
+pub struct FfiEnumOutput {
+    opaque: bool,
+    type_def: ItemEnum,
+    clone: bool,
+}
+
+impl ToTokens for FfiEnumOutput {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let has_only_lifetime_params = has_only_lifetime_parameters(&self.type_def.generics);
+
+        let drop_fn = has_only_lifetime_params.then(|| {
+            export_drop(
+                &self.type_def.ident,
+                &self.type_def.vis,
+                &self.type_def.generics,
+            )
+        });
+
+        let clone_fn = self.clone.then(|| {
+            export_clone(
+                &self.type_def.ident,
+                &self.type_def.vis,
+                &self.type_def.generics,
+                self.opaque,
+            )
+        });
+
+        let slice_access = (has_only_lifetime_params && self.opaque).then(|| {
+            export_slice_access(
+                &self.type_def.ident,
+                &self.type_def.vis,
+                &self.type_def.generics,
+            )
+        });
+
+        let type_def = &self.type_def;
+
+        let ffi_type_impl =
+            impl_ffi_type(&self.type_def.ident, &self.type_def.generics, self.opaque);
+
+        let repr_c_derive = (!self.opaque).then(|| {
+            quote! {
+                #[::safer_ffi_gen::safer_ffi::derive_ReprC]
+            }
+        });
+
+        let repr_c_impl = self.opaque.then(|| impl_c_repr_for_enum(&self.type_def));
+
+        let discriminant = (has_only_lifetime_params && self.opaque)
+            .then(|| generate_enum_discriminant(&self.type_def));
+
+        let variant_accessors = (has_only_lifetime_params && self.opaque)
+            .then(|| generate_enum_accessors(&self.type_def));
+
+        let out = quote! {
+            #repr_c_derive
+            #type_def
+
+            #repr_c_impl
+
+            #ffi_type_impl
+
+            #drop_fn
+
+            #clone_fn
+
+            #slice_access
+
+            #discriminant
+
+            #variant_accessors
+        };
+        out.to_tokens(tokens);
+    }
+}
+
+fn impl_ffi_type(ty: &Ident, generics: &Generics, opaque: bool) -> TokenStream {
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
-    match repr {
-        FfiRepr::C | FfiRepr::Transparent => quote! {
-            impl #impl_generics ::safer_ffi_gen::FfiType for #ty #type_generics #where_clause {
-                type Safe = #ty #type_generics;
-
-                fn into_safe(self) -> Self::Safe {
-                    self
-                }
-
-                fn from_safe(x: Self::Safe) -> Self {
-                    x
-                }
-            }
-        },
-        FfiRepr::Opaque => quote! {
+    if opaque {
+        quote! {
             impl #impl_generics ::safer_ffi_gen::FfiType for #ty #type_generics #where_clause {
                 type Safe = ::safer_ffi_gen::safer_ffi::boxed::Box_<#ty #type_generics>;
 
@@ -147,26 +235,128 @@ fn impl_ffi_type(ty: &Ident, generics: &Generics, repr: FfiRepr) -> TokenStream 
                     *x.into()
                 }
             }
-        },
+        }
+    } else {
+        quote! {
+            impl #impl_generics ::safer_ffi_gen::FfiType for #ty #type_generics #where_clause {
+                type Safe = #ty #type_generics;
+
+                fn into_safe(self) -> Self::Safe {
+                    self
+                }
+
+                fn from_safe(x: Self::Safe) -> Self {
+                    x
+                }
+            }
+        }
     }
+}
+
+fn impl_c_repr_for_enum(ty_def: &ItemEnum) -> TokenStream {
+    let ty = &ty_def.ident;
+    let (impl_generics, type_generics, where_clause) = ty_def.generics.split_for_impl();
+
+    quote! {
+        unsafe impl #impl_generics ::safer_ffi_gen::safer_ffi::layout::ReprC for #ty #type_generics #where_clause {
+            type CLayout = ::safer_ffi_gen::private::OpaqueLayout<Self>;
+
+            fn is_valid(layout: &Self::CLayout) -> bool {
+                unreachable!("This is never called according to safer-ffi `Opaque` implementation")
+            }
+        }
+    }
+}
+
+fn generate_enum_discriminant(ty_def: &ItemEnum) -> TokenStream {
+    let ty = &ty_def.ident;
+    let discriminant_ty = Ident::new(&format!("{ty}Discriminant"), Span::call_site());
+    let variants = ty_def.variants.iter().map(|v| &v.ident).collect::<Vec<_>>();
+    let (impl_generics, type_generics, where_clause) = ty_def.generics.split_for_impl();
+
+    let arms = variants.iter().map(|v| {
+        quote! {
+            #ty::#v { .. } => #discriminant_ty::#v
+        }
+    });
+
+    let function = Ident::new(
+        &format!("{}_discriminant", ty.to_string().to_snake_case()),
+        Span::call_site(),
+    );
+
+    quote! {
+        #[::safer_ffi_gen::safer_ffi::derive_ReprC]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        #[repr(u32)]
+        pub enum #discriminant_ty {
+            #(#variants,)*
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        pub fn #function #impl_generics(x: &#ty #type_generics) -> #discriminant_ty #where_clause {
+            match *x {
+                #(#arms,)*
+            }
+        }
+    }
+}
+
+fn generate_enum_accessors(ty_def: &ItemEnum) -> TokenStream {
+    let ty = &ty_def.ident;
+    let ty_prefix = ty.to_string().to_snake_case();
+    let (impl_generics, type_generics, where_clause) = ty_def.generics.split_for_impl();
+
+    ty_def
+        .variants
+        .iter()
+        .filter_map(|v| match &v.fields {
+            Fields::Unnamed(fields) => match fields.unnamed.first() {
+                Some(field) if fields.unnamed.len() == 1 => {
+                    let variant = &v.ident;
+
+                    let function = Ident::new(
+                        &format!("{ty_prefix}_to_{}", v.ident.to_string().to_snake_case()),
+                        Span::call_site(),
+                    );
+
+                    let field_ty = &field.ty;
+
+                    Some(quote! {
+                        #[::safer_ffi_gen::safer_ffi::ffi_export]
+                        pub fn #function #impl_generics(x: &#ty #type_generics) -> ::core::option::Option<&#field_ty> #where_clause {
+                            match x {
+                                #ty::#variant(data) => ::core::option::Option::Some(data),
+                                #[allow(unreachable_patterns)]
+                                _ => ::core::option::Option::None,
+                            }
+                        }
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
 }
 
 fn export_clone(
     ty: &Ident,
     type_visibility: &Visibility,
     generics: &Generics,
-    repr: FfiRepr,
+    opaque: bool,
 ) -> TokenStream {
     let prefix = fn_prefix(ty);
     let clone_ident = Ident::new(&format!("{prefix}_clone"), Span::call_site());
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-    let return_value = match repr {
-        FfiRepr::Opaque => quote! {
+    let return_value = if opaque {
+        quote! {
             ::safer_ffi_gen::safer_ffi::boxed::Box_::new(::core::clone::Clone::clone(x))
-        },
-        FfiRepr::C | FfiRepr::Transparent => quote! {
+        }
+    } else {
+        quote! {
             ::core::clone::Clone::clone(x)
-        },
+        }
     };
 
     quote! {
@@ -232,92 +422,39 @@ fn fn_prefix(ty: &Ident) -> String {
     ty.to_string().to_snake_case()
 }
 
-fn type_repr(attrs: &[Attribute]) -> Option<WithSpan<TypeRepr>> {
-    attrs
-        .iter()
-        .find(|attr| attr.path().is_ident("repr"))
-        .and_then(|attr| {
-            attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
-                .ok()
-        })
-        .and_then(|args| {
-            args.into_iter().find_map(|meta| match meta {
-                Meta::Path(p) => {
-                    if p.is_ident("C") {
-                        Some(WithSpan::new(TypeRepr::C, p.span()))
-                    } else if p.is_ident("transparent") {
-                        Some(WithSpan::new(TypeRepr::Transparent, p.span()))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-        })
+fn has_type_repr(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident("repr"))
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TypeRepr {
-    C,
-    Transparent,
-}
+fn is_opaque(args: &FfiTypeArgs, attrs: &[Attribute]) -> Result<bool, Error> {
+    let opaque = match (has_type_repr(attrs), args.opaque) {
+        (true, Some(span)) => Err(ErrorReason::IncompatibleRepr.with_span(span)),
+        (true, None) => Ok(false),
+        (false, Some(_)) => Ok(true),
+        (false, None) => Err(ErrorReason::MissingRepr.with_span(Span::call_site())),
+    }?;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum FfiRepr {
-    Opaque,
-    C,
-    Transparent,
-}
-
-impl From<TypeRepr> for FfiRepr {
-    fn from(r: TypeRepr) -> FfiRepr {
-        match r {
-            TypeRepr::C => FfiRepr::C,
-            TypeRepr::Transparent => FfiRepr::Transparent,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct WithSpan<T> {
-    item: T,
-    span: Span,
-}
-
-impl<T> WithSpan<T> {
-    fn new(item: T, span: Span) -> Self {
-        Self { item, span }
-    }
-
-    fn map<F, U>(self, f: F) -> WithSpan<U>
-    where
-        F: FnOnce(T) -> U,
-    {
-        WithSpan {
-            item: f(self.item),
-            span: self.span,
-        }
-    }
+    Ok(opaque)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        ffi_type::{type_repr, TypeRepr},
-        process_ffi_type, Error, ErrorReason,
+        ffi_type::{has_type_repr, process_ffi_struct},
+        Error, ErrorReason,
     };
     use assert2::assert;
     use syn::{parse_quote, ItemStruct};
 
     #[test]
     fn unknown_arg_to_ffi_type_fails() {
-        let res = process_ffi_type(parse_quote! { foobar }, parse_quote! { struct Foo {} });
+        let res = process_ffi_struct(parse_quote! { foobar }, parse_quote! { struct Foo {} });
         assert!(let Err(Error { reason: ErrorReason::UnknownArg, .. }) = res);
     }
 
     #[test]
     fn clone_for_type_generic_over_type_fails() {
-        let res = process_ffi_type(
+        let res = process_ffi_struct(
             parse_quote! { clone },
             parse_quote! { struct Foo<T> { x: T } },
         );
@@ -326,7 +463,7 @@ mod tests {
 
     #[test]
     fn clone_for_type_generic_over_lifetime_fails() {
-        let out = process_ffi_type(
+        let out = process_ffi_struct(
             parse_quote! { opaque, clone },
             parse_quote! { struct Foo<'a> { s: &'a str } },
         )
@@ -340,7 +477,7 @@ mod tests {
             #[repr(C)]
             struct Foo(i32);
         };
-        assert!(type_repr(&ty.attrs).unwrap().item == TypeRepr::C);
+        assert!(has_type_repr(&ty.attrs));
     }
 
     #[test]
@@ -349,6 +486,6 @@ mod tests {
             #[repr(transparent)]
             struct Foo(i32);
         };
-        assert!(type_repr(&ty.attrs).unwrap().item == TypeRepr::Transparent);
+        assert!(has_type_repr(&ty.attrs));
     }
 }
