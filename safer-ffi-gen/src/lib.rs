@@ -10,6 +10,7 @@ pub use safer_ffi_gen_macro::*;
 
 mod async_util;
 mod error;
+mod opaque;
 
 pub use async_util::*;
 
@@ -23,7 +24,10 @@ pub mod private {
     #[cfg(feature = "std")]
     pub use crate::error::{set_last_error, WrapDebug, WrapError, WrapNotDebug, WrapNotError};
 
-    pub use crate::error::{WrapIntoInt, WrapNotIntoInt};
+    pub use crate::{
+        error::{WrapIntoInt, WrapNotIntoInt},
+        opaque::OpaqueLayout,
+    };
 }
 
 pub trait FfiType {

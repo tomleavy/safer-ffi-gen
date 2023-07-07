@@ -10,6 +10,7 @@ repository = "https://github.com/tomleavy/safer-ffi-gen"
 
 [features]
 default = ["std"]
+headers = ["safer-ffi/headers", "std"]
 std = ["once_cell/std", "safer-ffi/std"]
 
 [dependencies]

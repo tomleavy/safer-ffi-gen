@@ -59,6 +59,7 @@ pub fn impl_enum_to_error_code(enumeration: ItemEnum) -> Result<TokenStream, Err
 
         #(#cfgs)*
         #[::safer_ffi_gen::safer_ffi::derive_ReprC]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
         #[repr(i32)]
         #non_exhaustive
         pub enum #discriminant_type {
