@@ -61,15 +61,6 @@ impl FfiModule {
 
         let alias_mod = export_module_name(target);
 
-        let replacements = type_parameters(&self.type_path)
-            .cloned()
-            .zip(type_parameters(target).cloned())
-            .collect();
-
-        self.functions
-            .iter_mut()
-            .for_each(|f| f.replace_types(&replacements));
-
         let alias_replacements = self
             .all_named_types()
             .into_iter()
@@ -85,6 +76,15 @@ impl FfiModule {
         self.functions
             .iter_mut()
             .for_each(|f| f.replace_type_constructors(&alias_replacements));
+
+        let replacements = type_parameters(&self.type_path)
+            .cloned()
+            .zip(type_parameters(target).cloned())
+            .collect();
+
+        self.functions
+            .iter_mut()
+            .for_each(|f| f.replace_types(&replacements));
 
         self.type_path = TypePath {
             qself: None,
