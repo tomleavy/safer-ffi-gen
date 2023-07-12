@@ -1,6 +1,7 @@
 use safer_ffi_gen::{ffi_type, safer_ffi_gen};
 
 #[ffi_type(opaque)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Foo {
     i: i32,
 }
@@ -54,4 +55,33 @@ fn mutable_slice_access_works() {
     foo_inc(foo_array_get_mut((&mut foos[..]).into(), 1));
     assert_eq!(foo_get(foo_array_get_mut((&mut foos[..]).into(), 0)), 34);
     assert_eq!(foo_get(foo_array_get_mut((&mut foos[..]).into(), 1)), 35);
+}
+
+#[test]
+fn vec_of_opaque_items_can_be_created() {
+    let foos = foo_vec_new();
+    assert_eq!(foos.len(), 0);
+}
+
+#[test]
+fn vec_of_opaque_items_can_be_pushed_to() {
+    let mut foos = foo_vec_new();
+    foo_vec_push(&mut foos, foo_new(33));
+    foo_vec_push(&mut foos, foo_new(34));
+    assert_eq!(&*foos, &[Foo::new(33), Foo::new(34)]);
+}
+
+#[test]
+fn vec_of_opaque_items_can_be_accessed_as_slice() {
+    let mut foos = foo_vec_new();
+    foo_vec_push(&mut foos, foo_new(33));
+    assert_eq!(&*foo_vec_as_slice(&foos), &[Foo::new(33)]);
+}
+
+#[test]
+fn vec_of_opaque_items_can_be_accessed_as_mutable_slice() {
+    let mut foos = foo_vec_new();
+    foo_vec_push(&mut foos, foo_new(33));
+    foo_inc(foo_array_get_mut(foo_vec_as_slice_mut(&mut foos), 0));
+    assert_eq!(&*foos, &[Foo::new(34)]);
 }
