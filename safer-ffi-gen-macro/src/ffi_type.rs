@@ -409,8 +409,8 @@ fn export_slice_access(
     generics: &Generics,
 ) -> TokenStream {
     let prefix = fn_prefix(ty);
-    let get_ident = Ident::new(&format!("{prefix}_array_get"), Span::call_site());
-    let get_mut_ident = Ident::new(&format!("{prefix}_array_get_mut"), Span::call_site());
+    let get_ident = Ident::new(&format!("{prefix}_slice_get"), Span::call_site());
+    let get_mut_ident = Ident::new(&format!("{prefix}_slice_get_mut"), Span::call_site());
     let (_, type_generics, _) = generics.split_for_impl();
     let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
     let mut generics = generics.clone();
