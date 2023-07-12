@@ -64,6 +64,13 @@ fn vec_of_opaque_items_can_be_created() {
 }
 
 #[test]
+fn vec_of_opaque_items_can_be_freed() {
+    let mut foos = foo_vec_new();
+    foo_vec_push(&mut foos, foo_new(33));
+    foo_vec_free(foos);
+}
+
+#[test]
 fn vec_of_opaque_items_can_be_pushed_to() {
     let mut foos = foo_vec_new();
     foo_vec_push(&mut foos, foo_new(33));

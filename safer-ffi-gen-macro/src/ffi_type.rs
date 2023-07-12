@@ -441,6 +441,7 @@ fn export_slice_access(
 fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generics) -> TokenStream {
     let prefix = fn_prefix(ty);
     let vec_new_ident = Ident::new(&format!("{prefix}_vec_new"), Span::call_site());
+    let vec_free_ident = Ident::new(&format!("{prefix}_vec_free"), Span::call_site());
     let vec_push_ident = Ident::new(&format!("{prefix}_vec_push"), Span::call_site());
     let vec_as_slice_ident = Ident::new(&format!("{prefix}_vec_as_slice"), Span::call_site());
     let vec_as_slice_mut_ident =
@@ -451,6 +452,12 @@ fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generi
         #[::safer_ffi_gen::safer_ffi::ffi_export]
         #type_visibility fn #vec_new_ident #impl_generics() -> ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics> #where_clause {
             ::safer_ffi_gen::safer_ffi::vec::Vec::EMPTY
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #vec_free_ident #impl_generics(
+            _v: ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) #where_clause {
         }
 
         #[::safer_ffi_gen::safer_ffi::ffi_export]
