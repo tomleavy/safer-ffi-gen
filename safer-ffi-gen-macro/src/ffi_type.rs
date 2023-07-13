@@ -119,6 +119,14 @@ impl ToTokens for FfiStructOutput {
             )
         });
 
+        let vec_access = (has_only_lifetime_params && self.opaque).then(|| {
+            export_vec_access(
+                &self.type_def.ident,
+                &self.type_def.vis,
+                &self.type_def.generics,
+            )
+        });
+
         let type_def = &self.type_def;
         let ty_repr = self.opaque.then(|| quote! { #[repr(opaque)] });
 
@@ -137,6 +145,8 @@ impl ToTokens for FfiStructOutput {
             #clone_fn
 
             #slice_access
+
+            #vec_access
         };
         out.to_tokens(tokens);
     }
@@ -178,6 +188,14 @@ impl ToTokens for FfiEnumOutput {
             )
         });
 
+        let vec_access = (has_only_lifetime_params && self.opaque).then(|| {
+            export_vec_access(
+                &self.type_def.ident,
+                &self.type_def.vis,
+                &self.type_def.generics,
+            )
+        });
+
         let type_def = &self.type_def;
 
         let ffi_type_impl =
@@ -210,6 +228,8 @@ impl ToTokens for FfiEnumOutput {
             #clone_fn
 
             #slice_access
+
+            #vec_access
 
             #discriminant
 
@@ -389,8 +409,8 @@ fn export_slice_access(
     generics: &Generics,
 ) -> TokenStream {
     let prefix = fn_prefix(ty);
-    let get_ident = Ident::new(&format!("{prefix}_array_get"), Span::call_site());
-    let get_mut_ident = Ident::new(&format!("{prefix}_array_get_mut"), Span::call_site());
+    let get_ident = Ident::new(&format!("{prefix}_slice_get"), Span::call_site());
+    let get_mut_ident = Ident::new(&format!("{prefix}_slice_get_mut"), Span::call_site());
     let (_, type_generics, _) = generics.split_for_impl();
     let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
     let mut generics = generics.clone();
@@ -414,6 +434,52 @@ fn export_slice_access(
             index: usize,
         ) -> & #lifetime mut #ty #type_generics #where_clause {
             &mut items.as_slice()[index]
+        }
+    }
+}
+
+fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generics) -> TokenStream {
+    let prefix = fn_prefix(ty);
+    let vec_new_ident = Ident::new(&format!("{prefix}_vec_new"), Span::call_site());
+    let vec_free_ident = Ident::new(&format!("{prefix}_vec_free"), Span::call_site());
+    let vec_push_ident = Ident::new(&format!("{prefix}_vec_push"), Span::call_site());
+    let vec_as_slice_ident = Ident::new(&format!("{prefix}_vec_as_slice"), Span::call_site());
+    let vec_as_slice_mut_ident =
+        Ident::new(&format!("{prefix}_vec_as_slice_mut"), Span::call_site());
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+
+    quote! {
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #vec_new_ident #impl_generics() -> ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics> #where_clause {
+            ::safer_ffi_gen::safer_ffi::vec::Vec::EMPTY
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #vec_free_ident #impl_generics(
+            _v: ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) #where_clause {
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #vec_push_ident #impl_generics(
+            v: &mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+            item: <#ty #type_generics as ::safer_ffi_gen::FfiType>::Safe,
+        ) #where_clause {
+            v.with_rust_mut(|v| v.push(<#ty #type_generics as ::safer_ffi_gen::FfiType>::from_safe(item)));
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #vec_as_slice_ident #impl_generics(
+            v: &::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_ref<'_, #ty #type_generics> #where_clause {
+            v.as_ref()
+        }
+
+        #[::safer_ffi_gen::safer_ffi::ffi_export]
+        #type_visibility fn #vec_as_slice_mut_ident #impl_generics(
+            v: &mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_mut<'_, #ty #type_generics> #where_clause {
+            v.as_mut()
         }
     }
 }

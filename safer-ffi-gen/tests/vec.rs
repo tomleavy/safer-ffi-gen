@@ -14,3 +14,9 @@ impl Foo {
 fn vec_can_be_passed_and_returned() {
     assert_eq!(&*foo_append(vec![0, 1].into(), 2), &[0, 1, 2]);
 }
+
+#[test]
+fn vec_of_bytes_can_be_freed() {
+    let v = vec![33u8].into();
+    safer_ffi_gen::vec_u8_free(v);
+}

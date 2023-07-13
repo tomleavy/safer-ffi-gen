@@ -202,3 +202,6 @@ impl<const N: usize, T: ReprC> FfiType for [T; N] {
         x
     }
 }
+
+#[safer_ffi::ffi_export]
+pub fn vec_u8_free(_v: safer_ffi::vec::Vec<u8>) {}
