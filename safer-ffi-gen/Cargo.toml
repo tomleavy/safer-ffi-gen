@@ -14,7 +14,7 @@ headers = ["safer-ffi/headers", "std"]
 std = ["once_cell/std", "safer-ffi/std"]
 
 [dependencies]
-safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/", version = "0.3.0"}
+safer-ffi-gen-macro = { path = "../safer-ffi-gen-macro/", version = "0.4.0"}
 safer-ffi = { version = "0.1.0", default-features = false, features = ["alloc", "proc_macros"] }
 once_cell = { version = "1.9", default-features = false, features = ["alloc", "critical-section"] }
 
