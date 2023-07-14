@@ -4,7 +4,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
 use syn::{
     punctuated::Punctuated, spanned::Spanned, Attribute, Fields, Generics, Ident, Item, ItemEnum,
-    ItemStruct, Lifetime, LifetimeParam, Meta, Token, Visibility,
+    ItemStruct, Lifetime, LifetimeParam, Meta, Token, Type, Visibility,
 };
 
 pub fn process_ffi_type(
@@ -40,10 +40,12 @@ fn process_ffi_enum(
 ) -> Result<FfiEnumOutput, Error> {
     let args = FfiTypeArgs::parse(&args, &type_def.generics)?;
     let opaque = is_opaque(&args, &type_def.attrs)?;
+    let repr = repr_type(&type_def.attrs)?;
 
     Ok(FfiEnumOutput {
         opaque,
         type_def,
+        repr,
         clone: args.clone.is_some(),
     })
 }
@@ -156,6 +158,7 @@ impl ToTokens for FfiStructOutput {
 pub struct FfiEnumOutput {
     opaque: bool,
     type_def: ItemEnum,
+    repr: Option<Type>,
     clone: bool,
 }
 
@@ -210,7 +213,7 @@ impl ToTokens for FfiEnumOutput {
         let repr_c_impl = self.opaque.then(|| impl_c_repr_for_enum(&self.type_def));
 
         let discriminant = (has_only_lifetime_params && self.opaque)
-            .then(|| generate_enum_discriminant(&self.type_def));
+            .then(|| generate_enum_discriminant(&self.type_def, self.repr.as_ref()));
 
         let variant_accessors = (has_only_lifetime_params && self.opaque)
             .then(|| generate_enum_accessors(&self.type_def));
@@ -288,7 +291,7 @@ fn impl_c_repr_for_enum(ty_def: &ItemEnum) -> TokenStream {
     }
 }
 
-fn generate_enum_discriminant(ty_def: &ItemEnum) -> TokenStream {
+fn generate_enum_discriminant(ty_def: &ItemEnum, repr: Option<&Type>) -> TokenStream {
     let ty = &ty_def.ident;
     let discriminant_ty = Ident::new(&format!("{ty}Discriminant"), Span::call_site());
     let variants = ty_def.variants.iter().map(|v| &v.ident).collect::<Vec<_>>();
@@ -300,6 +303,21 @@ fn generate_enum_discriminant(ty_def: &ItemEnum) -> TokenStream {
         }
     });
 
+    let repr = repr
+        .map(|ty| quote! { #[repr(#ty)] })
+        .unwrap_or_else(|| quote! { #[repr(i32)] });
+
+    let variant_defs = ty_def.variants.iter().map(|v| {
+        let name = &v.ident;
+        let assignment = v
+            .discriminant
+            .as_ref()
+            .map(|(eq, value)| quote! { #eq #value });
+        quote! {
+            #name #assignment
+        }
+    });
+
     let function = Ident::new(
         &format!("{}_discriminant", ty.to_string().to_snake_case()),
         Span::call_site(),
@@ -308,9 +326,9 @@ fn generate_enum_discriminant(ty_def: &ItemEnum) -> TokenStream {
     quote! {
         #[::safer_ffi_gen::safer_ffi::derive_ReprC]
         #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-        #[repr(u32)]
+        #repr
         pub enum #discriminant_ty {
-            #(#variants,)*
+            #(#variant_defs,)*
         }
 
         #[::safer_ffi_gen::safer_ffi::ffi_export]
@@ -488,15 +506,22 @@ fn fn_prefix(ty: &Ident) -> String {
     ty.to_string().to_snake_case()
 }
 
-fn has_type_repr(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident("repr"))
+fn has_type_repr(attrs: &[Attribute]) -> Result<bool, Error> {
+    repr_type(attrs).map(|ty| ty.is_some())
+}
+
+fn repr_type(attrs: &[Attribute]) -> Result<Option<Type>, Error> {
+    attrs
+        .iter()
+        .find_map(|attr| attr.path().is_ident("repr").then(|| attr.parse_args()))
+        .transpose()
+        .map_err(|e| ErrorReason::BadReprType.with_span(e.span()))
 }
 
 fn is_opaque(args: &FfiTypeArgs, attrs: &[Attribute]) -> Result<bool, Error> {
-    let opaque = match (has_type_repr(attrs), args.opaque) {
-        (true, Some(span)) => Err(ErrorReason::IncompatibleRepr.with_span(span)),
+    let opaque = match (has_type_repr(attrs)?, args.opaque) {
+        (_, Some(_)) => Ok(true),
         (true, None) => Ok(false),
-        (false, Some(_)) => Ok(true),
         (false, None) => Err(ErrorReason::MissingRepr.with_span(Span::call_site())),
     }?;
 
@@ -543,7 +568,7 @@ mod tests {
             #[repr(C)]
             struct Foo(i32);
         };
-        assert!(has_type_repr(&ty.attrs));
+        assert!(has_type_repr(&ty.attrs).unwrap());
     }
 
     #[test]
@@ -552,6 +577,6 @@ mod tests {
             #[repr(transparent)]
             struct Foo(i32);
         };
-        assert!(has_type_repr(&ty.attrs));
+        assert!(has_type_repr(&ty.attrs).unwrap());
     }
 }
