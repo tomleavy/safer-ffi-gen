@@ -49,10 +49,10 @@ specified with `safer_ffi_gen::specialize` instead"
     GenericFunction,
     #[error("Unsupported parameter pattern")]
     UnsupportedParamPattern,
-    #[error("Incompatible type representations")]
-    IncompatibleRepr,
     #[error("Missing type representation")]
     MissingRepr,
+    #[error("Invalid type in `repr`")]
+    BadReprType,
     #[error("Too many variants")]
     TooManyVariants,
     #[error("Unsupported item type (only structs and enums are supported)")]

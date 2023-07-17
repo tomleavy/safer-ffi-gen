@@ -24,6 +24,15 @@ pub struct Bar {
     x: i32,
 }
 
+#[ffi_type(opaque)]
+#[derive(Debug)]
+#[repr(u8)]
+pub enum Baz {
+    A,
+    B = 3,
+    C,
+}
+
 #[test]
 fn enumeration_with_data_is_supported() {
     assert_eq!(foo_get_int(&Foo::B(33)), 33);
@@ -32,6 +41,13 @@ fn enumeration_with_data_is_supported() {
 #[test]
 fn discriminant_is_generated() {
     assert_eq!(foo_discriminant(&Foo::B(33)), FooDiscriminant::B);
+}
+
+#[test]
+fn discriminant_values_account_for_user_specified_values() {
+    assert_eq!(BazDiscriminant::A as u8, 0);
+    assert_eq!(BazDiscriminant::B as u8, 3);
+    assert_eq!(BazDiscriminant::C as u8, 4);
 }
 
 #[test]
