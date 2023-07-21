@@ -1,4 +1,4 @@
-use crate::{has_only_lifetime_parameters, Error, ErrorReason};
+use crate::{has_only_lifetime_parameters, is_cfg, Error, ErrorReason};
 use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
@@ -294,12 +294,14 @@ fn impl_c_repr_for_enum(ty_def: &ItemEnum) -> TokenStream {
 fn generate_enum_discriminant(ty_def: &ItemEnum, repr: Option<&Type>) -> TokenStream {
     let ty = &ty_def.ident;
     let discriminant_ty = Ident::new(&format!("{ty}Discriminant"), Span::call_site());
-    let variants = ty_def.variants.iter().map(|v| &v.ident).collect::<Vec<_>>();
     let (impl_generics, type_generics, where_clause) = ty_def.generics.split_for_impl();
 
-    let arms = variants.iter().map(|v| {
+    let arms = ty_def.variants.iter().map(|v| {
+        let name = &v.ident;
+        let cfg_attrs = v.attrs.iter().filter(|&a| is_cfg(a));
         quote! {
-            #ty::#v { .. } => #discriminant_ty::#v
+            #(#cfg_attrs)*
+            #ty::#name { .. } => #discriminant_ty::#name
         }
     });
 
@@ -309,10 +311,14 @@ fn generate_enum_discriminant(ty_def: &ItemEnum, repr: Option<&Type>) -> TokenSt
 
     let variant_defs = ty_def.variants.iter().map(|v| {
         let name = &v.ident;
+
         let assignment = v
             .discriminant
             .as_ref()
             .map(|(eq, value)| quote! { #eq #value });
+
+        // Ideally the discriminant variants would inherit the cfg attributes from the original
+        // variants but safer-ffi does not support such enums.
         quote! {
             #name #assignment
         }
@@ -360,7 +366,10 @@ fn generate_enum_accessors(ty_def: &ItemEnum) -> TokenStream {
 
                     let field_ty = &field.ty;
 
+                    let cfg_attrs = v.attrs.iter().filter(|&a| is_cfg(a));
+
                     Some(quote! {
+                        #(#cfg_attrs)*
                         #[::safer_ffi_gen::safer_ffi::ffi_export]
                         pub fn #function #impl_generics(x: &#ty #type_generics) -> ::core::option::Option<&#field_ty> #where_clause {
                             match x {

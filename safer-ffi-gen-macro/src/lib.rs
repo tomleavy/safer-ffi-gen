@@ -1,8 +1,8 @@
 use proc_macro2::{Ident, Span};
 use quote::ToTokens;
 use syn::{
-    parse_macro_input, punctuated::Punctuated, spanned::Spanned, GenericParam, Generics, Meta,
-    PathArguments, Token, TypePath,
+    parse_macro_input, punctuated::Punctuated, spanned::Spanned, Attribute, GenericParam, Generics,
+    Meta, PathArguments, Token, TypePath,
 };
 
 mod enum_to_error_code;
@@ -149,6 +149,14 @@ fn replace_type_path_constructor(path: &mut TypePath, replacement: &TypePath) {
     path.path.segments = replacement.path.segments.iter().cloned().collect();
     path.path.segments.last_mut().unwrap().arguments = args;
     path.path.segments.extend(tail);
+}
+
+fn attr_is(attr: &Attribute, id: &str) -> bool {
+    attr.path().get_ident().map_or(false, |i| i == id)
+}
+
+fn is_cfg(attr: &Attribute) -> bool {
+    attr_is(attr, "cfg")
 }
 
 #[cfg(test)]
