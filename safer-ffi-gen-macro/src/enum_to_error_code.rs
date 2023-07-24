@@ -1,4 +1,4 @@
-use crate::{Error, ErrorReason};
+use crate::{attr_is, is_cfg, Error, ErrorReason};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{Attribute, Ident, ItemEnum};
@@ -68,16 +68,8 @@ pub fn impl_enum_to_error_code(enumeration: ItemEnum) -> Result<TokenStream, Err
     })
 }
 
-fn is_cfg(attr: &Attribute) -> bool {
-    attr_is(attr, "cfg")
-}
-
 fn is_non_exhaustive(attr: &Attribute) -> bool {
     attr_is(attr, "non_exhaustive")
-}
-
-fn attr_is(attr: &Attribute, id: &str) -> bool {
-    attr.path().get_ident().map_or(false, |i| i == id)
 }
 
 fn index_to_error_code(i: usize) -> Option<i32> {
