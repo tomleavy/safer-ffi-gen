@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, string::String, vec, vec::Vec};
 use safer_ffi::layout::ReprC;
 
 pub use safer_ffi;
@@ -205,3 +205,13 @@ impl<const N: usize, T: ReprC> FfiType for [T; N] {
 
 #[safer_ffi::ffi_export]
 pub fn vec_u8_free(_v: safer_ffi::vec::Vec<u8>) {}
+
+#[safer_ffi::ffi_export]
+pub fn vec_u8_new(length: usize) -> safer_ffi::vec::Vec<u8> {
+    vec![0; length].into()
+}
+
+#[safer_ffi::ffi_export]
+pub fn vec_u8_from_slice(bytes: safer_ffi::slice::slice_ref<'_, u8>) -> safer_ffi::vec::Vec<u8> {
+    bytes.to_vec().into()
+}
