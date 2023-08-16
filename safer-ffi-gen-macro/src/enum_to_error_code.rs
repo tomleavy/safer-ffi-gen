@@ -1,7 +1,10 @@
-use crate::{attr_is, is_cfg, Error, ErrorReason};
-use proc_macro2::{Span, TokenStream};
+use crate::{
+    utils::{attr_is, is_cfg, new_ident},
+    Error, ErrorReason,
+};
+use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Attribute, Ident, ItemEnum};
+use syn::{Attribute, ItemEnum};
 
 pub fn impl_enum_to_error_code(enumeration: ItemEnum) -> Result<TokenStream, Error> {
     let cfgs = enumeration
@@ -12,7 +15,7 @@ pub fn impl_enum_to_error_code(enumeration: ItemEnum) -> Result<TokenStream, Err
 
     let ty = &enumeration.ident;
     let (impl_generics, ty_generics, where_clause) = enumeration.generics.split_for_impl();
-    let discriminant_type = Ident::new(&format!("{ty}Code"), Span::call_site());
+    let discriminant_type = new_ident(format!("{ty}Code"));
 
     let non_exhaustive = if enumeration.attrs.iter().any(is_non_exhaustive) {
         Some(quote! { #[non_exhaustive] })

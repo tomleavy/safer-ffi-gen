@@ -61,6 +61,8 @@ impl_ffi_type_as_identity!(i32);
 impl_ffi_type_as_identity!(u32);
 impl_ffi_type_as_identity!(i64);
 impl_ffi_type_as_identity!(u64);
+impl_ffi_type_as_identity!(isize);
+impl_ffi_type_as_identity!(usize);
 impl_ffi_type_as_identity!(bool);
 impl_ffi_type_as_identity!(());
 

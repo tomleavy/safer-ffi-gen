@@ -55,8 +55,14 @@ specified with `safer_ffi_gen::specialize` instead"
     BadReprType,
     #[error("Too many variants")]
     TooManyVariants,
-    #[error("Unsupported item type (only structs and enums are supported)")]
+    #[error("Unsupported item type")]
     UnsupportedItemType,
+    #[error("Unexpected receiver type in free function")]
+    UnexpectedReceiverType,
+    #[error("Missing `ffi_name`")]
+    MissingFfiName,
+    #[error("Unexpected `ffi_name` in generic definition")]
+    UnexpectedFfiName,
 }
 
 impl ErrorReason {
