@@ -1,4 +1,7 @@
-use crate::{has_only_lifetime_parameters, is_cfg, Error, ErrorReason};
+use crate::{
+    utils::{has_only_lifetime_parameters, is_cfg, new_ident},
+    Error, ErrorReason,
+};
 use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
@@ -293,7 +296,7 @@ fn impl_c_repr_for_enum(ty_def: &ItemEnum) -> TokenStream {
 
 fn generate_enum_discriminant(ty_def: &ItemEnum, repr: Option<&Type>) -> TokenStream {
     let ty = &ty_def.ident;
-    let discriminant_ty = Ident::new(&format!("{ty}Discriminant"), Span::call_site());
+    let discriminant_ty = new_ident(format!("{ty}Discriminant"));
     let (impl_generics, type_generics, where_clause) = ty_def.generics.split_for_impl();
 
     let arms = ty_def.variants.iter().map(|v| {
@@ -324,10 +327,7 @@ fn generate_enum_discriminant(ty_def: &ItemEnum, repr: Option<&Type>) -> TokenSt
         }
     });
 
-    let function = Ident::new(
-        &format!("{}_discriminant", ty.to_string().to_snake_case()),
-        Span::call_site(),
-    );
+    let function = new_ident(format!("{}_discriminant", ty.to_string().to_snake_case()));
 
     quote! {
         #[::safer_ffi_gen::safer_ffi::derive_ReprC]
@@ -359,10 +359,8 @@ fn generate_enum_accessors(ty_def: &ItemEnum) -> TokenStream {
                 Some(field) if fields.unnamed.len() == 1 => {
                     let variant = &v.ident;
 
-                    let function = Ident::new(
-                        &format!("{ty_prefix}_to_{}", v.ident.to_string().to_snake_case()),
-                        Span::call_site(),
-                    );
+                    let function = new_ident(
+                        format!("{ty_prefix}_to_{}", v.ident.to_string().to_snake_case()));
 
                     let field_ty = &field.ty;
 
@@ -394,7 +392,7 @@ fn export_clone(
     opaque: bool,
 ) -> TokenStream {
     let prefix = fn_prefix(ty);
-    let clone_ident = Ident::new(&format!("{prefix}_clone"), Span::call_site());
+    let clone_ident = new_ident(format!("{prefix}_clone"));
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
     let return_value = if opaque {
         quote! {
@@ -418,7 +416,7 @@ fn export_clone(
 
 fn export_drop(ty: &Ident, type_visibility: &Visibility, generics: &Generics) -> TokenStream {
     let prefix = fn_prefix(ty);
-    let drop_ident = Ident::new(&format!("{prefix}_free"), Span::call_site());
+    let drop_ident = new_ident(format!("{prefix}_free"));
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
     quote! {
@@ -436,8 +434,8 @@ fn export_slice_access(
     generics: &Generics,
 ) -> TokenStream {
     let prefix = fn_prefix(ty);
-    let get_ident = Ident::new(&format!("{prefix}_slice_get"), Span::call_site());
-    let get_mut_ident = Ident::new(&format!("{prefix}_slice_get_mut"), Span::call_site());
+    let get_ident = new_ident(format!("{prefix}_slice_get"));
+    let get_mut_ident = new_ident(format!("{prefix}_slice_get_mut"));
     let (_, type_generics, _) = generics.split_for_impl();
     let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
     let mut generics = generics.clone();
@@ -467,12 +465,11 @@ fn export_slice_access(
 
 fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generics) -> TokenStream {
     let prefix = fn_prefix(ty);
-    let vec_new_ident = Ident::new(&format!("{prefix}_vec_new"), Span::call_site());
-    let vec_free_ident = Ident::new(&format!("{prefix}_vec_free"), Span::call_site());
-    let vec_push_ident = Ident::new(&format!("{prefix}_vec_push"), Span::call_site());
-    let vec_as_slice_ident = Ident::new(&format!("{prefix}_vec_as_slice"), Span::call_site());
-    let vec_as_slice_mut_ident =
-        Ident::new(&format!("{prefix}_vec_as_slice_mut"), Span::call_site());
+    let vec_new_ident = new_ident(format!("{prefix}_vec_new"));
+    let vec_free_ident = new_ident(format!("{prefix}_vec_free"));
+    let vec_push_ident = new_ident(format!("{prefix}_vec_push"));
+    let vec_as_slice_ident = new_ident(format!("{prefix}_vec_as_slice"));
+    let vec_as_slice_mut_ident = new_ident(format!("{prefix}_vec_as_slice_mut"));
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 
     quote! {

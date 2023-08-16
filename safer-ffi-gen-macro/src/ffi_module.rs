@@ -1,35 +1,42 @@
 use crate::{
-    has_only_lifetime_parameters, specialization::specialization_macro_ident,
-    type_path_constructor, type_path_last_ident, Error, ErrorReason, FfiSignature,
+    utils::{
+        has_only_lifetime_parameters, is_cfg, is_placeholder_lifetime, new_ident, parent_path,
+        return_type_has_implicit_lifetime, specialization_macro_name, string_to_path,
+        LifetimeInserter, TypeReplacer,
+    },
+    Error, ErrorReason,
 };
 use heck::ToSnakeCase;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
-use std::{collections::HashSet, mem::take};
 use syn::{
     parse::{Parse, ParseStream},
-    GenericArgument, GenericParam, Generics, Ident, ImplItem, ItemImpl, PathArguments, Signature,
-    Type, TypePath, Visibility,
+    punctuated::Punctuated,
+    Attribute, FnArg, GenericParam, Generics, Ident, ImplItem, ImplItemFn, ItemImpl, Lifetime,
+    LifetimeParam, Pat, PatIdent, PatType, Path, Receiver, Signature, Type, TypePath,
+    TypeReference, Visibility, WhereClause,
 };
 
 #[derive(Debug)]
 pub struct FfiModule {
-    type_path: TypePath,
+    self_type: TypePath,
     generics: Generics,
-    functions: Vec<FfiSignature>,
+    functions: Vec<ImplItemFn>,
 }
 
 impl FfiModule {
     pub fn new(impl_block: ItemImpl) -> Result<Self, Error> {
+        // Trait impl blocks are not supported
         if let Some((_, trait_, _)) = impl_block.trait_ {
             return Err(ErrorReason::TraitImplBlock.spanned(trait_));
         }
 
-        let Type::Path(path) = &*impl_block.self_ty else {
+        // Only type paths are supported
+        let Type::Path(self_type) = *impl_block.self_ty else {
             return Err(ErrorReason::ImplBlockMustBeForTypePath.spanned(impl_block.self_ty));
         };
 
-        // Find functions
+        // Find public functions not explicitly ignored
         let functions = impl_block
             .items
             .into_iter()
@@ -42,147 +49,17 @@ impl FfiModule {
                                 .contains("safer_ffi_gen_ignore")
                         });
 
-                    exported.then(|| FfiSignature::parse((*impl_block.self_ty).clone(), f))
+                    exported.then_some(f)
                 }
                 _ => None,
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Vec<_>>();
 
         Ok(FfiModule {
-            type_path: path.clone(),
+            self_type,
             generics: impl_block.generics,
             functions,
         })
-    }
-
-    pub fn specialize(&mut self, alias: &Ident, target: &TypePath) {
-        let mut alias_prefix = target.clone();
-        alias_prefix.path.segments.pop();
-
-        let alias_mod = export_module_name(target);
-
-        let alias_replacements = self
-            .all_named_types()
-            .into_iter()
-            .enumerate()
-            .map(|(i, ty)| {
-                let mut alias_path = alias_prefix.clone();
-                alias_path.path.segments.push(alias_mod.clone().into());
-                alias_path.path.segments.push(type_alias(i).into());
-                (ty, alias_path)
-            })
-            .collect();
-
-        self.functions
-            .iter_mut()
-            .for_each(|f| f.replace_type_constructors(&alias_replacements));
-
-        let replacements = type_parameters(&self.type_path)
-            .cloned()
-            .zip(type_parameters(target).cloned())
-            .collect();
-
-        self.functions
-            .iter_mut()
-            .for_each(|f| f.replace_types(&replacements));
-
-        self.type_path = TypePath {
-            qself: None,
-            path: alias.clone().into(),
-        };
-
-        self.generics.params = take(&mut self.generics.params)
-            .into_iter()
-            .filter(|p| matches!(p, GenericParam::Lifetime(_)))
-            .collect();
-    }
-
-    fn write_functions(&self, tokens: &mut TokenStream) {
-        self.functions.iter().for_each(|f| {
-            let mut f = f.clone();
-            f.add_generics(&self.generics);
-            f.prefix_with_type(&self.type_path);
-            f.to_tokens(tokens);
-        });
-    }
-
-    fn write_specialization_macro(&self, tokens: &mut TokenStream) {
-        let export_module = export_module_name(&self.type_path);
-        let exported_types = self.all_exported_types();
-        let (aliases, types): (Vec<_>, Vec<_>) = exported_types.iter().map(|(a, t)| (a, t)).unzip();
-
-        quote! {
-            pub mod #export_module {
-                #(pub use #types as #aliases;)*
-            }
-        }
-        .to_tokens(tokens);
-
-        let macro_name = specialization_macro_ident(&self.type_path);
-        let type_path = &self.type_path;
-
-        let functions = self.functions.iter().cloned().map(Signature::from);
-
-        let (impl_generics, _, where_clause) = self.generics.split_for_impl();
-
-        let mini_impl_block = quote! {
-            impl #impl_generics #type_path #where_clause {
-                #(
-                    pub #functions {}
-                )*
-            }
-        };
-
-        quote! {
-            #[macro_export]
-            macro_rules! #macro_name {
-                ($alias:ident = $ty:ty) => {
-                    ::safer_ffi_gen::__specialize!($alias, $ty, #mini_impl_block);
-                };
-            }
-        }
-        .to_tokens(tokens)
-    }
-
-    fn all_exported_types(&self) -> Vec<(Ident, TypePath)> {
-        self.all_named_types()
-            .into_iter()
-            .enumerate()
-            .map(|(i, ty)| (type_alias(i), type_alias_target(ty)))
-            .collect()
-    }
-
-    fn all_named_types(&self) -> Vec<TypePath> {
-        let type_params = type_parameters(&self.type_path)
-            .filter_map(|ty| match ty {
-                Type::Path(p) => Some(p),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
-
-        let mut all_named_types = self
-            .functions
-            .iter()
-            .flat_map(|f| f.all_types())
-            .flat_map(extract_named_types)
-            .filter(|ty| !type_params.contains(ty))
-            .filter(type_must_be_exported)
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-
-        all_named_types.sort_by_cached_key(|ty| ty.to_token_stream().to_string());
-        all_named_types
-    }
-}
-
-impl ToTokens for FfiModule {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        if has_only_lifetime_parameters(&self.generics) {
-            self.write_functions(tokens)
-        } else {
-            self.write_specialization_macro(tokens)
-        }
     }
 }
 
@@ -193,111 +70,454 @@ impl Parse for FfiModule {
     }
 }
 
-fn type_parameters(type_path: &TypePath) -> impl Iterator<Item = &Type> {
-    type_path
-        .path
+impl ToTokens for FfiModule {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let type_prefix = type_to_string(&self.self_type);
+
+        let free_functions = self
+            .functions
+            .iter()
+            .map(|f| {
+                let mut free_function = into_free_function(
+                    f.sig.clone(),
+                    Type::Path(self.self_type.clone()),
+                    self.generics.clone(),
+                );
+
+                let call = forward_call(&free_function, &Type::Path(self.self_type.clone()));
+                let new_name = free_function_wrapper_name(&self.self_type, &f.sig.ident);
+                free_function.ident = new_name;
+
+                // If the function is generic only over lifetimes, it can be exposed through FFI.
+                // If not, it will need to be specialized, i.e. instantiated with concrete types.
+                let ffi_attribute = if has_only_lifetime_parameters(&free_function.generics) {
+                    let ffi_name = new_ident(format!("{type_prefix}_{}", f.sig.ident));
+                    quote! {
+                        #[::safer_ffi_gen::safer_ffi_gen(ffi_name = #ffi_name)]
+                    }
+                } else {
+                    quote! {
+                        #[::safer_ffi_gen::safer_ffi_gen]
+                    }
+                };
+
+                (ffi_attribute, free_function, call)
+            })
+            .collect::<Vec<_>>();
+
+        // Attributes on the original method
+        let attrs = self.functions.iter().map(|f| &f.attrs);
+
+        // FFI attribute added by this code
+        let ffi_attributes = free_functions.iter().map(|(attr, ..)| attr);
+
+        let signatures = free_functions
+            .iter()
+            .map(|(_, sig, ..)| sig)
+            .collect::<Vec<_>>();
+
+        let calls = free_functions.iter().map(|(_, _, call)| call);
+
+        quote! {
+            #(
+                #(#attrs)*
+                #ffi_attributes
+                pub #signatures {
+                    #calls
+                }
+            )*
+        }
+        .to_tokens(tokens);
+
+        // Generate specialization macro if `Self` is generic over types
+        if !has_only_lifetime_parameters(&self.generics) {
+            let macro_name = specialization_macro_name(&type_prefix);
+
+            let functions = self
+                .functions
+                .iter()
+                .filter(|f| has_only_lifetime_parameters(&f.sig.generics))
+                .map(|f| FunctionToSpecialize {
+                    attributes: f
+                        .attrs
+                        .iter()
+                        .filter(|attr| is_cfg(attr))
+                        .cloned()
+                        .collect(),
+                    name: f.sig.ident.clone(),
+                });
+
+            quote! {
+                #[macro_export]
+                macro_rules! #macro_name {
+                    ($alias:ident = $ty:ty) => {
+                        ::safer_ffi_gen::__specialize_impl!($alias, $ty, #(#functions,)*);
+                    };
+                }
+            }
+            .to_tokens(tokens)
+        }
+    }
+}
+
+/// Convert method into free function
+fn into_free_function(
+    mut signature: Signature,
+    self_type: Type,
+    mut generics: Generics,
+) -> Signature {
+    // Handle lifetime elision rules that allow implicitly eliding lifetimes in return type if they
+    // are tied to `self`'s lifetime.
+    if return_type_has_implicit_lifetime(&signature.output) {
+        let self_lifetime = signature.inputs.iter_mut().find_map(|input| {
+            let FnArg::Receiver(Receiver { ty, .. }) = input else {
+                return None;
+            };
+
+            let Type::Reference(TypeReference { lifetime, .. }) = &mut **ty else {
+                return None;
+            };
+
+            if lifetime
+                .as_ref()
+                .filter(|&lt| !is_placeholder_lifetime(lt))
+                .is_none()
+            {
+                // Set an explicit lifetime if one isn't used
+                *lifetime = Some(make_self_lifetime());
+            }
+
+            lifetime.clone()
+        });
+
+        if let Some(self_lifetime) = self_lifetime {
+            if self_lifetime == make_self_lifetime() {
+                // If the lifetime was generated by this code, it needs to be declared as a generic
+                // parameter
+                signature
+                    .generics
+                    .params
+                    .push(GenericParam::Lifetime(LifetimeParam::new(
+                        self_lifetime.clone(),
+                    )));
+            }
+
+            // Insert `self` lifetime wherever there's an implicit lifetime in the return type
+            syn::visit_mut::visit_return_type_mut(
+                &mut LifetimeInserter::new(self_lifetime),
+                &mut signature.output,
+            );
+        }
+    }
+
+    // Convert `self` parameter to regular parameter
+    signature.inputs.iter_mut().for_each(|input| match input {
+        FnArg::Receiver(Receiver { attrs, ty, .. }) => {
+            *input = FnArg::Typed(PatType {
+                attrs: std::mem::take(attrs),
+                pat: Box::new(Pat::Ident(PatIdent {
+                    attrs: Vec::new(),
+                    by_ref: None,
+                    mutability: None,
+                    ident: self_param_name(),
+                    subpat: None,
+                })),
+                colon_token: Default::default(),
+                ty: ty.clone(),
+            });
+        }
+        FnArg::Typed(p) => {
+            if let Pat::Ident(p) = &mut *p.pat {
+                // If the parameter is `mut p: T`, remove `mut` to avoid warning as the parameter is
+                // only forwarded to the original method
+                if p.mutability.is_some() && p.by_ref.is_none() {
+                    p.mutability = None;
+                }
+            }
+        }
+    });
+
+    // Merge `Self` and method generic parameters
+    generics.params.extend(signature.generics.params);
+    signature.generics.params = generics.params;
+
+    if !signature.generics.params.is_empty() {
+        signature.generics.lt_token = Some(Default::default());
+        signature.generics.gt_token = Some(Default::default());
+    }
+
+    let mut where_clause = generics.where_clause.unwrap_or(WhereClause {
+        where_token: Default::default(),
+        predicates: Default::default(),
+    });
+
+    // Merge `where` clauses
+    where_clause.predicates.extend(
+        signature
+            .generics
+            .where_clause
+            .map(|clause| clause.predicates)
+            .unwrap_or_default(),
+    );
+
+    signature.generics.where_clause =
+        Some(where_clause).filter(|clause| !clause.predicates.is_empty());
+
+    // Replace `Self` type with actual type
+    let mut replacer = TypeReplacer {
+        replacements: &[(literal_self_type(), self_type)].into_iter().collect(),
+    };
+
+    syn::visit_mut::visit_signature_mut(&mut replacer, &mut signature);
+    signature
+}
+
+fn make_self_lifetime() -> Lifetime {
+    Lifetime::new("'__safer_ffi_gen_self", Span::call_site())
+}
+
+/// Return code to forward free function call to original method
+fn forward_call(signature: &Signature, self_type: &Type) -> TokenStream {
+    let function = &signature.ident;
+
+    let params = signature.inputs.iter().filter_map(|input| match input {
+        FnArg::Typed(p) => match &*p.pat {
+            Pat::Ident(p) => Some(&p.ident),
+            _ => None,
+        },
+        _ => None,
+    });
+
+    let await_suffix = signature.asyncness.is_some().then(|| quote! { .await });
+
+    quote! {
+        <#self_type>::#function(#(#params),*) #await_suffix
+    }
+}
+
+fn literal_self_type() -> Type {
+    Type::Path(TypePath {
+        qself: None,
+        path: string_to_path("Self"),
+    })
+}
+
+fn self_param_name() -> Ident {
+    new_ident("__safer_ffi_gen_self")
+}
+
+fn free_function_wrapper_name(self_type: &TypePath, function: &Ident) -> Ident {
+    let type_prefix = type_to_string(self_type);
+    new_ident(format!("ffi_{type_prefix}_{function}"))
+}
+
+fn type_to_string(ty: &TypePath) -> String {
+    ty.path
         .segments
         .last()
-        .and_then(|segment| match &segment.arguments {
-            PathArguments::AngleBracketed(args) => {
-                Some(args.args.iter().filter_map(|arg| match arg {
-                    GenericArgument::Type(ty) => Some(ty),
-                    _ => None,
-                }))
-            }
-            _ => None,
+        .unwrap()
+        .ident
+        .to_string()
+        .to_snake_case()
+}
+
+#[derive(Debug)]
+pub struct ImplSpecialization {
+    alias: Ident,
+    target: Path,
+    functions: Vec<FunctionToSpecialize>,
+}
+
+impl Parse for ImplSpecialization {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let alias = Ident::parse(input)?;
+        let _ = syn::token::Comma::parse(input)?;
+        let target = Path::parse(input)?;
+        let _ = syn::token::Comma::parse(input)?;
+        let functions = Punctuated::<_, syn::token::Comma>::parse_terminated(input)?
+            .into_iter()
+            .collect();
+        Ok(Self {
+            alias,
+            target,
+            functions,
         })
-        .into_iter()
-        .flatten()
-}
-
-fn extract_named_types(ty: &Type) -> impl Iterator<Item = TypePath> {
-    let mut extractor = TypePathExtractor::default();
-    syn::visit::visit_type(&mut extractor, ty);
-    extractor.paths.into_iter()
-}
-
-#[derive(Debug, Default)]
-struct TypePathExtractor {
-    paths: Vec<TypePath>,
-}
-
-impl<'a> syn::visit::Visit<'a> for TypePathExtractor {
-    fn visit_type_path(&mut self, path: &'a TypePath) {
-        let p = type_path_constructor(path);
-        self.paths.push(p);
-        syn::visit::visit_type_path(self, path);
     }
 }
 
-fn export_module_name(type_path: &TypePath) -> Ident {
-    Ident::new(
-        &format!(
-            "__safer_ffi_gen_types_{}",
-            type_path_last_ident(type_path).to_string().to_snake_case(),
-        ),
-        Span::call_site(),
-    )
-}
+impl ToTokens for ImplSpecialization {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let target_parent = parent_path(&self.target);
+        let target_prefix = target_parent.as_ref().map(|p| quote! { #p:: });
 
-fn type_must_be_exported(ty: &TypePath) -> bool {
-    // More types will need to be added here eventually (in theory,
-    // most types in the Rust prelude)
-    !ty.path.is_ident("i32")
-}
+        // Macros are found at the crate root, with the exception of macro-expanded macros in the
+        // current crate
+        let macro_prefix = target_parent
+            .as_ref()
+            .filter(|p| p.segments.first().unwrap().ident != "crate")
+            .map(|p| {
+                let leading_colon = &p.leading_colon;
+                let p = p.segments.first().unwrap();
+                quote! { #leading_colon #p:: }
+            });
 
-fn type_alias_target(mut ty: TypePath) -> TypePath {
-    match &ty.path.leading_colon {
-        Some(_) => ty,
-        None => match &*ty
-            .path
-            .segments
-            .first()
-            .map(|segment| segment.ident.to_string())
-            .unwrap_or_default()
-        {
-            "crate" => ty,
-            _ => {
-                ty.path
-                    .segments
-                    .insert(0, Ident::new("super", Span::call_site()).into());
-                ty
+        let self_type = TypePath {
+            qself: None,
+            path: self.target.segments.last().unwrap().ident.clone().into(),
+        };
+
+        // Generate calls to each free function specialization macro
+        let macro_calls = self.functions.iter().map(|function| {
+            let f = &function.name;
+            let free_function_wrapper = free_function_wrapper_name(&self_type, f);
+            let macro_id = specialization_macro_name(free_function_wrapper.to_string());
+
+            let function_alias =
+                new_ident(format!("{}_{f}", self.alias.to_string().to_snake_case()));
+
+            let generic_params = &self.target.segments.last().unwrap().arguments;
+            let attrs = &function.attributes;
+
+            quote! {
+                #(#attrs)*
+                #macro_prefix #macro_id! {
+                    #function_alias = #target_prefix #free_function_wrapper :: #generic_params
+                }
             }
-        },
+        });
+
+        quote! { #(#macro_calls)* }.to_tokens(tokens);
     }
 }
 
-fn type_alias(i: usize) -> Ident {
-    Ident::new(&format!("Type{i}"), Span::call_site())
+#[derive(Clone, Debug)]
+struct FunctionToSpecialize {
+    attributes: Vec<Attribute>,
+    name: Ident,
+}
+
+impl ToTokens for FunctionToSpecialize {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let attributes = &self.attributes;
+        let name = &self.name;
+
+        quote! {
+            #(#attributes)* #name
+        }
+        .to_tokens(tokens);
+    }
+}
+
+impl Parse for FunctionToSpecialize {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let attributes = Attribute::parse_outer(input)?;
+        let name = Ident::parse(input)?;
+        Ok(Self { attributes, name })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::ffi_module::{extract_named_types, FfiModule};
+    use crate::{
+        ffi_module::{forward_call, into_free_function, self_param_name, FfiModule},
+        test_utils::Pretty,
+    };
     use assert2::assert;
-    use std::{collections::HashSet, hash::Hash};
-    use syn::{parse_quote, Signature, TypePath};
+    use quote::quote;
+    use syn::{parse_quote, Generics, Signature};
 
-    fn make_set<I>(items: I) -> HashSet<I::Item>
-    where
-        I: IntoIterator,
-        I::Item: Eq + Hash,
-    {
-        items.into_iter().collect()
+    fn extract_generics(signature: Signature) -> Generics {
+        signature.generics
     }
 
     #[test]
-    fn extracting_types_from_single_type_path_works() {
-        let actual = extract_named_types(&parse_quote! { foo::Bar });
-        let expected: TypePath = parse_quote! { foo::Bar };
-        assert!(make_set(actual) == make_set([expected]));
+    fn associated_function_can_be_converted_to_free_function() {
+        let original: Signature = parse_quote! { fn foo(i: i32) };
+        let actual = into_free_function(original, parse_quote! { Foo }, Default::default());
+        let expected: Signature = parse_quote! { fn foo(i: i32) };
+        assert!(Pretty(actual) == Pretty(expected));
     }
 
     #[test]
-    fn extracting_types_from_generic_type_works() {
-        let actual = extract_named_types(&parse_quote! { Vec<i32> });
-        let expected: [TypePath; 2] = [parse_quote! { Vec }, parse_quote! { i32 }];
-        assert!(make_set(actual) == make_set(expected));
+    fn self_method_can_be_converted_to_free_function() {
+        let original: Signature = parse_quote! { fn foo(self, i: i32) };
+        let actual = into_free_function(original, parse_quote! { Foo }, Default::default());
+        let this = self_param_name();
+        let expected: Signature = parse_quote! { fn foo(#this: Foo, i: i32) };
+        assert!(Pretty(actual) == Pretty(expected));
+    }
+
+    #[test]
+    fn by_ref_self_method_can_be_converted_to_free_function() {
+        let original: Signature = parse_quote! { fn foo(&self, i: i32) };
+        let actual = into_free_function(original, parse_quote! { Foo }, Default::default());
+        let this = self_param_name();
+        let expected: Signature = parse_quote! { fn foo(#this: &Foo, i: i32) };
+        assert!(Pretty(actual) == Pretty(expected));
+    }
+
+    #[test]
+    fn by_ref_mut_self_method_can_be_converted_to_free_function() {
+        let original: Signature = parse_quote! { fn foo(&mut self, i: i32) };
+        let actual = into_free_function(original, parse_quote! { Foo }, Default::default());
+        let this = self_param_name();
+        let expected: Signature = parse_quote! { fn foo(#this: &mut Foo, i: i32) };
+        assert!(Pretty(actual) == Pretty(expected));
+    }
+
+    #[test]
+    fn method_using_self_type_can_be_converted_to_free_function() {
+        let original: Signature = parse_quote! { fn foo(self, other: Self) };
+        let actual = into_free_function(original, parse_quote! { Foo }, Default::default());
+        let this = self_param_name();
+        let expected: Signature = parse_quote! { fn foo(#this: Foo, other: Foo) };
+        assert!(Pretty(actual) == Pretty(expected));
+    }
+
+    #[test]
+    fn method_using_self_type_in_other_type_can_be_converted_to_free_function() {
+        let original: Signature = parse_quote! { fn foo(self, others: Vec<Self>) };
+        let actual = into_free_function(original, parse_quote! { Foo }, Default::default());
+        let this = self_param_name();
+        let expected: Signature = parse_quote! { fn foo(#this: Foo, others: Vec<Foo>) };
+        assert!(Pretty(actual) == Pretty(expected));
+    }
+
+    #[test]
+    fn self_in_where_clause_is_replaced_when_converting_to_free_function() {
+        let original: Signature = parse_quote! { fn foo() where Self: Sized };
+        let actual = into_free_function(original, parse_quote! { Foo }, Default::default());
+        let expected: Signature = parse_quote! { fn foo() where Foo: Sized };
+        assert!(Pretty(actual) == Pretty(expected));
+    }
+
+    #[test]
+    fn self_type_generics_are_added_to_method_converted_to_free_function() {
+        let original: Signature = parse_quote! { fn foo() where Self: Sized };
+        let actual = into_free_function(
+            original,
+            parse_quote! { Foo<T> },
+            extract_generics(parse_quote! { fn f<T>() where T: Clone }),
+        );
+        let expected: Signature = parse_quote! { fn foo<T>() where T: Clone, Foo<T>: Sized };
+        assert!(Pretty(actual) == Pretty(expected));
+    }
+
+    #[test]
+    fn call_without_parameters_can_be_forwarded() {
+        let actual = forward_call(&parse_quote! { fn foo() }, &parse_quote! { Foo });
+        let expected = quote! { <Foo>::foo() };
+        assert!(actual.to_string() == expected.to_string());
+    }
+
+    #[test]
+    fn call_with_parameters_can_be_forwarded() {
+        let actual = forward_call(
+            &parse_quote! { fn foo(this: &Foo, i: i32) },
+            &parse_quote! { Foo },
+        );
+        let expected = quote! { <Foo>::foo(this, i) };
+        assert!(actual.to_string() == expected.to_string());
     }
 
     #[test]
@@ -311,8 +531,8 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(module.functions.len(), 1);
-        assert_eq!(Signature::from(module.functions[0].clone()).ident, "foo");
+        assert!(module.functions.len() == 1);
+        assert!(module.functions[0].sig.ident == "foo");
     }
 
     #[test]
@@ -330,7 +550,7 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(module.functions.len(), 1);
-        assert_eq!(Signature::from(module.functions[0].clone()).ident, "foo");
+        assert!(module.functions.len() == 1);
+        assert!(module.functions[0].sig.ident == "foo");
     }
 }
