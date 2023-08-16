@@ -1,6 +1,6 @@
 [package]
 name = "safer-ffi-gen-macro"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Tom Leavy", "Stephane Raux"]
 description = "Proc macro implementation for safer-ffi-gen"
 edition = "2021"
