@@ -471,6 +471,14 @@ fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generi
     let vec_as_slice_ident = new_ident(format!("{prefix}_vec_as_slice"));
     let vec_as_slice_mut_ident = new_ident(format!("{prefix}_vec_as_slice_mut"));
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
+
+    let mut generics_with_extra_lifetime = generics.clone();
+    generics_with_extra_lifetime
+        .params
+        .push(LifetimeParam::new(lifetime.clone()).into());
+
+    let (impl_generics_with_extra_lifetime, ..) = generics_with_extra_lifetime.split_for_impl();
 
     quote! {
         #[::safer_ffi_gen::safer_ffi::ffi_export]
@@ -493,16 +501,16 @@ fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generi
         }
 
         #[::safer_ffi_gen::safer_ffi::ffi_export]
-        #type_visibility fn #vec_as_slice_ident #impl_generics(
-            v: &::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
-        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_ref<'_, #ty #type_generics> #where_clause {
+        #type_visibility fn #vec_as_slice_ident #impl_generics_with_extra_lifetime(
+            v: &#lifetime ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_ref<#lifetime, #ty #type_generics> #where_clause {
             v.as_ref()
         }
 
         #[::safer_ffi_gen::safer_ffi::ffi_export]
-        #type_visibility fn #vec_as_slice_mut_ident #impl_generics(
-            v: &mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
-        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_mut<'_, #ty #type_generics> #where_clause {
+        #type_visibility fn #vec_as_slice_mut_ident #impl_generics_with_extra_lifetime(
+            v: &#lifetime mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_mut<#lifetime, #ty #type_generics> #where_clause {
             v.as_mut()
         }
     }
