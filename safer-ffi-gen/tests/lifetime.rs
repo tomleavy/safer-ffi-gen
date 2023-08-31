@@ -1,6 +1,7 @@
 use safer_ffi_gen::{ffi_type, safer_ffi_gen};
 
-#[ffi_type(opaque)]
+#[ffi_type(clone, opaque)]
+#[derive(Clone)]
 pub struct Foo<'a> {
     bar: &'a Bar,
 }
@@ -16,7 +17,8 @@ impl<'a> Foo<'a> {
     }
 }
 
-#[ffi_type(opaque)]
+#[ffi_type(clone, opaque)]
+#[derive(Clone)]
 pub struct Bar {
     i: i32,
 }
