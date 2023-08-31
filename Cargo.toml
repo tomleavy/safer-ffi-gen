@@ -1,5 +1,5 @@
 [workspace]
-
+resolver = "2"
 members = [
     "safer-ffi-gen-macro",
     "safer-ffi-gen"
