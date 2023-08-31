@@ -4,8 +4,10 @@ use quote::ToTokens;
 use std::collections::{HashMap, HashSet};
 use syn::{
     parse::{Parse, ParseStream},
-    Attribute, GenericArgument, GenericParam, Generics, Ident, Lifetime, Path, PathArguments,
-    PathSegment, ReturnType, Type, TypePath,
+    punctuated::Punctuated,
+    AngleBracketedGenericArguments, Attribute, Expr, ExprPath, GenericArgument, GenericParam,
+    Generics, Ident, Lifetime, Path, PathArguments, PathSegment, PredicateType, ReturnType, Type,
+    TypeParamBound, TypePath,
 };
 
 pub fn has_only_lifetime_parameters(generics: &Generics) -> bool {
@@ -254,14 +256,77 @@ pub fn is_placeholder_lifetime(lifetime: &Lifetime) -> bool {
     lifetime.ident == "'_"
 }
 
+pub fn generics_to_path_arguments(generics: &Generics) -> PathArguments {
+    let args = generics
+        .params
+        .iter()
+        .map(generic_param_to_generic_arg)
+        .collect::<Punctuated<_, _>>();
+    if args.is_empty() {
+        PathArguments::None
+    } else {
+        PathArguments::AngleBracketed(AngleBracketedGenericArguments {
+            colon2_token: None,
+            lt_token: Default::default(),
+            args,
+            gt_token: Default::default(),
+        })
+    }
+}
+
+pub fn generic_param_to_generic_arg(p: &GenericParam) -> GenericArgument {
+    match p {
+        GenericParam::Const(p) => GenericArgument::Const(Expr::Path(ExprPath {
+            attrs: Vec::new(),
+            qself: None,
+            path: p.ident.clone().into(),
+        })),
+        GenericParam::Lifetime(p) => GenericArgument::Lifetime(p.lifetime.clone()),
+        GenericParam::Type(p) => GenericArgument::Type(Type::Path(TypePath {
+            qself: None,
+            path: p.ident.clone().into(),
+        })),
+    }
+}
+
+pub fn add_lifetime_constraint_to_type(ty: Type, lifetime: Lifetime) -> PredicateType {
+    PredicateType {
+        lifetimes: None,
+        bounded_ty: ty,
+        colon_token: Default::default(),
+        bounds: [TypeParamBound::Lifetime(lifetime.clone())]
+            .into_iter()
+            .collect(),
+    }
+}
+
+pub fn make_generic_type(name: Ident, generics: &Generics) -> Type {
+    TypePath {
+        qself: None,
+        path: Path {
+            leading_colon: None,
+            segments: [PathSegment {
+                ident: name,
+                arguments: generics_to_path_arguments(generics),
+            }]
+            .into_iter()
+            .collect(),
+        },
+    }
+    .into()
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
         test_utils::Pretty,
-        utils::{is_cfg, string_to_path, TypeCtor, TypeCtorExtractor},
+        utils::{
+            add_lifetime_constraint_to_type, generic_param_to_generic_arg, is_cfg,
+            make_generic_type, string_to_path, TypeCtor, TypeCtorExtractor,
+        },
     };
     use assert2::check;
-    use syn::{parse_quote, Attribute, Path, Type};
+    use syn::{parse_quote, Attribute, GenericArgument, GenericParam, Path, Type, WherePredicate};
 
     #[test]
     fn is_cfg_returns_true_for_cfg_attribute() {
@@ -367,6 +432,39 @@ mod tests {
 
         syn::visit::visit_type(&mut extractor, &ty);
         let actual = extractor.unique_type_ctors();
+        check!(actual == expected);
+    }
+
+    #[test]
+    fn lifetime_param_can_be_mapped_to_arg() {
+        let param: GenericParam = parse_quote! { 'a };
+        let expected: GenericArgument = parse_quote! { 'a };
+        let actual = generic_param_to_generic_arg(&param);
+        check!(actual == expected);
+    }
+
+    #[test]
+    fn type_param_can_be_mapped_to_arg() {
+        let param: GenericParam = parse_quote! { T };
+        let expected: GenericArgument = parse_quote! { T };
+        let actual = generic_param_to_generic_arg(&param);
+        check!(actual == expected);
+    }
+
+    #[test]
+    fn lifetime_constraint_can_be_added_to_type() {
+        let expected: WherePredicate = parse_quote! { T: 'a };
+        let actual = WherePredicate::Type(add_lifetime_constraint_to_type(
+            parse_quote! { T },
+            parse_quote! { 'a },
+        ));
+        check!(actual == expected);
+    }
+
+    #[test]
+    fn generic_type_can_be_built() {
+        let expected: Type = parse_quote! { Foo<'a, T> };
+        let actual = make_generic_type(parse_quote! { Foo }, &parse_quote! { <'a, T> });
         check!(actual == expected);
     }
 }

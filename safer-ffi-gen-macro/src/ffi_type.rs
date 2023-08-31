@@ -1,5 +1,8 @@
 use crate::{
-    utils::{has_only_lifetime_parameters, is_cfg, new_ident},
+    utils::{
+        add_lifetime_constraint_to_type, has_only_lifetime_parameters, is_cfg, make_generic_type,
+        new_ident,
+    },
     Error, ErrorReason,
 };
 use heck::ToSnakeCase;
@@ -393,7 +396,27 @@ fn export_clone(
 ) -> TokenStream {
     let prefix = fn_prefix(ty);
     let clone_ident = new_ident(format!("{prefix}_clone"));
-    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let (_, type_generics, _) = generics.split_for_impl();
+    let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
+    let mut generics_with_extra_lifetime = generics.clone();
+
+    generics_with_extra_lifetime
+        .params
+        .push(LifetimeParam::new(lifetime.clone()).into());
+
+    generics_with_extra_lifetime
+        .make_where_clause()
+        .predicates
+        .push(
+            add_lifetime_constraint_to_type(
+                make_generic_type(ty.clone(), generics),
+                lifetime.clone(),
+            )
+            .into(),
+        );
+
+    let (impl_generics, _, where_clause) = generics_with_extra_lifetime.split_for_impl();
+
     let return_value = if opaque {
         quote! {
             ::safer_ffi_gen::safer_ffi::boxed::Box_::new(::core::clone::Clone::clone(x))
@@ -407,7 +430,7 @@ fn export_clone(
     quote! {
         #[::safer_ffi_gen::safer_ffi::ffi_export]
         #type_visibility fn #clone_ident #impl_generics(
-            x: <&#ty #type_generics as ::safer_ffi_gen::FfiType>::Safe,
+            x: <&#lifetime #ty #type_generics as ::safer_ffi_gen::FfiType>::Safe,
         ) -> <#ty #type_generics as ::safer_ffi_gen::FfiType>::Safe #where_clause {
             #return_value
         }
@@ -438,11 +461,24 @@ fn export_slice_access(
     let get_mut_ident = new_ident(format!("{prefix}_slice_get_mut"));
     let (_, type_generics, _) = generics.split_for_impl();
     let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
-    let mut generics = generics.clone();
-    generics
+    let mut generics_with_extra_lifetime = generics.clone();
+
+    generics_with_extra_lifetime
         .params
         .push(LifetimeParam::new(lifetime.clone()).into());
-    let (impl_generics, _, where_clause) = generics.split_for_impl();
+
+    generics_with_extra_lifetime
+        .make_where_clause()
+        .predicates
+        .push(
+            add_lifetime_constraint_to_type(
+                make_generic_type(ty.clone(), generics),
+                lifetime.clone(),
+            )
+            .into(),
+        );
+
+    let (impl_generics, _, where_clause) = generics_with_extra_lifetime.split_for_impl();
 
     quote! {
         #[::safer_ffi_gen::safer_ffi::ffi_export]
@@ -471,6 +507,27 @@ fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generi
     let vec_as_slice_ident = new_ident(format!("{prefix}_vec_as_slice"));
     let vec_as_slice_mut_ident = new_ident(format!("{prefix}_vec_as_slice_mut"));
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
+
+    let mut generics_with_extra_lifetime = generics.clone();
+
+    generics_with_extra_lifetime
+        .params
+        .push(LifetimeParam::new(lifetime.clone()).into());
+
+    generics_with_extra_lifetime
+        .make_where_clause()
+        .predicates
+        .push(
+            add_lifetime_constraint_to_type(
+                make_generic_type(ty.clone(), generics),
+                lifetime.clone(),
+            )
+            .into(),
+        );
+
+    let (impl_generics_with_extra_lifetime, _, where_clause_with_extra_lifetime) =
+        generics_with_extra_lifetime.split_for_impl();
 
     quote! {
         #[::safer_ffi_gen::safer_ffi::ffi_export]
@@ -485,24 +542,28 @@ fn export_vec_access(ty: &Ident, type_visibility: &Visibility, generics: &Generi
         }
 
         #[::safer_ffi_gen::safer_ffi::ffi_export]
-        #type_visibility fn #vec_push_ident #impl_generics(
-            v: &mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        #type_visibility fn #vec_push_ident #impl_generics_with_extra_lifetime(
+            v: &#lifetime mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
             item: <#ty #type_generics as ::safer_ffi_gen::FfiType>::Safe,
-        ) #where_clause {
+        ) #where_clause_with_extra_lifetime {
             v.with_rust_mut(|v| v.push(<#ty #type_generics as ::safer_ffi_gen::FfiType>::from_safe(item)));
         }
 
         #[::safer_ffi_gen::safer_ffi::ffi_export]
-        #type_visibility fn #vec_as_slice_ident #impl_generics(
-            v: &::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
-        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_ref<'_, #ty #type_generics> #where_clause {
+        #type_visibility fn #vec_as_slice_ident #impl_generics_with_extra_lifetime(
+            v: &#lifetime ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_ref<#lifetime, #ty #type_generics>
+        #where_clause_with_extra_lifetime
+        {
             v.as_ref()
         }
 
         #[::safer_ffi_gen::safer_ffi::ffi_export]
-        #type_visibility fn #vec_as_slice_mut_ident #impl_generics(
-            v: &mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
-        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_mut<'_, #ty #type_generics> #where_clause {
+        #type_visibility fn #vec_as_slice_mut_ident #impl_generics_with_extra_lifetime(
+            v: &#lifetime mut ::safer_ffi_gen::safer_ffi::vec::Vec<#ty #type_generics>,
+        ) -> ::safer_ffi_gen::safer_ffi::slice::slice_mut<#lifetime, #ty #type_generics>
+        #where_clause_with_extra_lifetime
+        {
             v.as_mut()
         }
     }
