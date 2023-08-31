@@ -441,11 +441,24 @@ fn export_slice_access(
     let get_mut_ident = new_ident(format!("{prefix}_slice_get_mut"));
     let (_, type_generics, _) = generics.split_for_impl();
     let lifetime = Lifetime::new("'__safer_ffi_gen_lifetime", Span::call_site());
-    let mut generics = generics.clone();
-    generics
+    let mut generics_with_extra_lifetime = generics.clone();
+
+    generics_with_extra_lifetime
         .params
         .push(LifetimeParam::new(lifetime.clone()).into());
-    let (impl_generics, _, where_clause) = generics.split_for_impl();
+
+    generics_with_extra_lifetime
+        .make_where_clause()
+        .predicates
+        .push(
+            add_lifetime_constraint_to_type(
+                make_generic_type(ty.clone(), generics),
+                lifetime.clone(),
+            )
+            .into(),
+        );
+
+    let (impl_generics, _, where_clause) = generics_with_extra_lifetime.split_for_impl();
 
     quote! {
         #[::safer_ffi_gen::safer_ffi::ffi_export]
