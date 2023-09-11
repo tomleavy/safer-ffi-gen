@@ -14,7 +14,7 @@ pub struct OpaqueLayout<T>(PhantomData<T>);
 
 impl<T> Clone for OpaqueLayout<T> {
     fn clone(&self) -> Self {
-        OpaqueLayout(PhantomData)
+        *self
     }
 }
 
